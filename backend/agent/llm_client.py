@@ -9,6 +9,14 @@ from typing import Optional, Any, Dict
 from abc import ABC, abstractmethod
 
 
+def _openai_compatible_base_url(base_url: str) -> str:
+    """Normalize a provider host to the OpenAI-compatible `/v1` API root."""
+    normalized = base_url.strip().rstrip("/")
+    if not normalized.endswith("/v1"):
+        normalized = f"{normalized}/v1"
+    return normalized
+
+
 class LLMClient(ABC):
     """Abstract base class for LLM clients"""
 
@@ -47,10 +55,19 @@ class OpenAIClient(LLMClient):
     def supports_multimodal_images(self) -> bool:
         return True
     
-    def __init__(self, api_key: str):
+    def __init__(
+        self,
+        api_key: str,
+        base_url: Optional[str] = None,
+        default_model: Optional[str] = None,
+    ):
         try:
             from openai import OpenAI
-            self.client = OpenAI(api_key=api_key)
+            client_kwargs = {"api_key": api_key}
+            if base_url:
+                client_kwargs["base_url"] = _openai_compatible_base_url(base_url)
+            self.client = OpenAI(**client_kwargs)
+            self.default_model = default_model or "gpt-4o-mini"
         except ImportError:
             raise ImportError("OpenAI package not installed. Install with: pip install openai")
     
@@ -62,7 +79,7 @@ class OpenAIClient(LLMClient):
         max_tokens: Optional[int] = None,
         **kwargs
     ) -> str:
-        model = model or "gpt-4o-mini"
+        model = model or self.default_model
         
         response = self.client.chat.completions.create(
             model=model,
@@ -258,14 +275,22 @@ def create_llm_client(config: Optional[Dict[str, Any]] = None) -> Optional[LLMCl
             # OpenAI configuration
             if config:
                 api_key = config.get('api_key')
+                base_url = config.get('base_url')
+                default_model = config.get('model')
             else:
                 api_key = os.getenv('OPENAI_API_KEY')
+                base_url = os.getenv('OPENAI_BASE_URL')
+                default_model = os.getenv('OPENAI_MODEL')
             
             if not api_key:
                 print('[LLMClient] Warning: OPENAI_API_KEY not set. Using mock LLM.')
                 return MockLLMClient()
             
-            return OpenAIClient(api_key=api_key)
+            return OpenAIClient(
+                api_key=api_key,
+                base_url=base_url,
+                default_model=default_model,
+            )
         
         elif provider == 'claude':
             # Anthropic Claude configuration
@@ -288,4 +313,3 @@ def create_llm_client(config: Optional[Dict[str, Any]] = None) -> Optional[LLMCl
     except Exception as e:
         print(f'[LLMClient] Error creating LLM client: {e}. Using mock LLM.')
         return MockLLMClient()
-

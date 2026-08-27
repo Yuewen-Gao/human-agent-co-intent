@@ -22,6 +22,16 @@ from routes.participant import (
 )
 from agent.agent_context_protocol import AgentContextProtocol
 from agent.llm_client import create_llm_client, LLMClient
+from agent.map_task.agent_session_context import (
+    append_maptask_grid_context,
+    append_session_conversation_memory,
+)
+from agent.map_task.grounding_policy import append_grounding_policy_if_enabled
+from agent.map_task.mental_model_update import (
+    append_mental_model_update_prompt,
+    parse_mental_model_patch,
+)
+from services.mental_model_service import apply_agent_mental_model_patch
 
 
 class AgentRunner:
@@ -62,6 +72,9 @@ class AgentRunner:
         # Agent state
         self.is_running = False
         self.perception_thread = None
+        self._perception_call_lock = threading.Lock()
+        self._message_trigger_lock = threading.Lock()
+        self._message_trigger_timer = None
         self.protocol = AgentContextProtocol(participant_id, session_id, experiment_type)
         
         # Load prompt template (will be loaded later when we have participant info)
@@ -154,7 +167,8 @@ class AgentRunner:
                 perception_window = float(perception_window) if perception_window is not None else 15.0
                 
                 # Perceive and act
-                self._perceive_and_act(session, session_key)
+                with self._perception_call_lock:
+                    self._perceive_and_act(session, session_key)
                 
                 # Wait for next perception window
                 time.sleep(perception_window)
@@ -244,6 +258,8 @@ class AgentRunner:
             
             # Parse response
             actions = self._parse_response(response)
+            if self.experiment_type == 'maptask':
+                self._apply_mental_model_patch(response, session, session_key)
             
             # Debug: Print parsed actions
             if actions:
@@ -293,6 +309,42 @@ class AgentRunner:
             print(f'[AgentRunner] Error in perceive_and_act: {e}')
             import traceback
             traceback.print_exc()
+
+    def request_perception(self, debounce_seconds: float = 0.5) -> None:
+        """Schedule one debounced perception after a human-visible event."""
+        if not self.is_running:
+            return
+
+        def run_triggered_perception():
+            with self._message_trigger_lock:
+                self._message_trigger_timer = None
+            with self._perception_call_lock:
+                session_key, session = find_session_by_identifier(self.session_id)
+                if session and session.get('status') == 'running':
+                    self._perceive_and_act(session, session_key)
+
+        with self._message_trigger_lock:
+            if self._message_trigger_timer is not None:
+                self._message_trigger_timer.cancel()
+            self._message_trigger_timer = threading.Timer(debounce_seconds, run_triggered_perception)
+            self._message_trigger_timer.daemon = True
+            self._message_trigger_timer.start()
+
+    def _apply_mental_model_patch(self, response: str, session: Dict[str, Any], session_key: str) -> None:
+        try:
+            payload = json.loads(response)
+        except (TypeError, json.JSONDecodeError):
+            return
+        result = apply_agent_mental_model_patch(session, parse_mental_model_patch(payload))
+        if not result.get('changed'):
+            return
+        session_module.commit_session(session_key, session)
+        from websocket.handlers import get_socketio
+        get_socketio().emit(
+            'mental_model_updated',
+            {'session_id': session.get('session_id') or session_key, 'mental_model': result['mental_model']},
+            room=session.get('session_id') or session_key,
+        )
     
     def _trigger_vote(self, vote_type: str, participant: Dict[str, Any], session: Dict[str, Any], session_key: str) -> bool:
         """
@@ -937,6 +989,13 @@ Response:"""
         
         # Add perception section
         prompt += f"\n\n<CURRENT GAME STATE>\n{perception_str}\n"
+        prompt = append_session_conversation_memory(
+            prompt, self.participant_id, session
+        )
+        if self.experiment_type == 'maptask':
+            prompt = append_maptask_grid_context(prompt, participant, session)
+            prompt = append_grounding_policy_if_enabled(prompt, participant)
+            prompt = append_mental_model_update_prompt(prompt, session.get('mental_model'))
         
         return prompt
     
@@ -1660,4 +1719,3 @@ def stop_all_agent_runners():
     for runner in _agent_runners.values():
         runner.stop()
     _agent_runners.clear()
-

@@ -370,6 +370,7 @@ def register_handlers(socketio):
                     break
             
             sender_type = sender_participant.get('type', 'unknown') if sender_participant else 'unknown'
+            is_human_sender = (sender_type or '').lower() not in ('ai', 'ai_agent')
             
             # Broadcast message to all participants in the session
             # Always use session_id (UUID) as the room identifier
@@ -386,8 +387,18 @@ def register_handlers(socketio):
                 # Private message: send to sender and receiver only
                 socketio.emit('message_received', message, room=room_id)
 
+            if is_human_sender and found_session.get('experiment_type') == 'maptask':
+                from agent.agent_runner import get_agent_runner
+                for participant in participants:
+                    participant_id = participant.get('id') or participant.get('participant_id')
+                    is_agent = str(participant.get('type', '')).lower() in ('ai', 'ai_agent')
+                    can_see_message = receiver is None or participant_id == receiver
+                    if is_agent and can_see_message:
+                        runner = get_agent_runner(participant_id, actual_session_id)
+                        if runner:
+                            runner.request_perception()
+
             # Action log (human only gets screenshot/html_snapshot)
-            is_human_sender = (sender_type or '').lower() not in ('ai', 'ai_agent')
             from services.action_logger import log_action
             logged_action_id = log_action(
                 session_id=actual_session_id,
@@ -446,6 +457,44 @@ def register_handlers(socketio):
                 emit('error', {'message': str(e), 'type': 'send_message_error'})
             except Exception:
                 pass
+
+    @socketio.on('mental_model_update')
+    def handle_mental_model_update(data):
+        """Persist a participant edit and broadcast the revisioned visible model."""
+        try:
+            session_identifier = data.get('session_id')
+            sender = data.get('sender')
+            if not session_identifier or not sender:
+                emit('mental_model_update_error', {'message': 'session_id and sender are required'})
+                return
+            import routes.session as session_module
+            from services.mental_model_service import apply_user_mental_model_update
+
+            session_key, session = None, None
+            for key, candidate in session_module.sessions.items():
+                if candidate.get('session_id') == session_identifier or key == session_identifier:
+                    session_key, session = key, candidate
+                    break
+            if not session:
+                emit('mental_model_update_error', {'message': 'Session not found'})
+                return
+            participant = next(
+                (item for item in session.get('participants', []) if (item.get('id') or item.get('participant_id')) == sender),
+                None,
+            )
+            if not participant or str(participant.get('type', '')).lower() in ('ai', 'ai_agent'):
+                emit('mental_model_update_error', {'message': 'Only human participants can edit the model'})
+                return
+            result = apply_user_mental_model_update(session, data.get('base_revision'), data.get('fields'))
+            if not result['changed']:
+                emit('mental_model_update_error', {'message': result['reason'] or 'No changes'})
+                return
+            session_module.commit_session(session_key, session)
+            room_id = session.get('session_id') or session_key
+            socketio.emit('mental_model_updated', {'session_id': room_id, 'mental_model': result['mental_model']}, room=room_id)
+        except Exception as exc:
+            print(f'[WebSocket] mental_model_update error: {exc}')
+            emit('mental_model_update_error', {'message': 'Unable to update mental model'})
 
     @socketio.on('send_message_context')
     def handle_send_message_context(data):
@@ -729,4 +778,3 @@ def broadcast_participant_update(session_id, participants, session_info=None, up
         print(f'Error broadcasting participant update: {e}')
         import traceback
         traceback.print_exc()
-

@@ -354,6 +354,47 @@ def hydrate_sessions_from_db() -> None:
     except Exception as e:
         print(f'[Session] hydrate from DB failed: {e}')
 
+
+def restore_running_agent_runners() -> None:
+    """Recreate in-memory runners for persisted sessions that were running at startup."""
+    try:
+        from agent.agent_runner import get_agent_runner, register_agent_runner
+
+        for session_key, session in sessions.items():
+            if session.get('status') != 'running':
+                continue
+
+            session_id = session.get('session_id') or session_key
+            experiment_type = session.get('experiment_type')
+            if not experiment_type:
+                continue
+
+            restored = False
+            for participant in session.get('participants', []):
+                if (participant.get('type') or '').lower() not in ('ai', 'ai_agent'):
+                    continue
+
+                participant_id = participant.get('id') or participant.get('participant_id')
+                if not participant_id or get_agent_runner(participant_id, session_id):
+                    continue
+
+                register_agent_runner(
+                    participant_id=participant_id,
+                    session_id=session_id,
+                    experiment_type=experiment_type,
+                    participant_role=participant.get('role'),
+                )
+                participant['status'] = 'online'
+                restored = True
+                print(f'[Session] Restored agent runner for participant {participant_id} in running session {session_id}')
+
+            if restored:
+                commit_session(session_key, session)
+    except Exception as e:
+        print(f'[Session] Error restoring running agent runners: {e}')
+        import traceback
+        traceback.print_exc()
+
 # Create a new session
 @session_bp.route('/api/sessions', methods=['POST'])
 def create_session():
@@ -589,7 +630,11 @@ def update_session(session_identifier):
         # If status changed to 'running', start all agent runners
         if status_changed_to_running:
             try:
-                from agent.agent_runner import start_agent_runner, get_agent_runner
+                from agent.agent_runner import (
+                    get_agent_runner,
+                    register_agent_runner,
+                    start_agent_runner,
+                )
                 participants = found_session.get('participants', [])
                 session_id = found_session.get('session_id') or session_key
                 experiment_type = found_session.get('experiment_type')
@@ -605,12 +650,23 @@ def update_session(session_identifier):
                 for participant in participants:
                     participant_type = participant.get('type', '').lower()
                     if participant_type in ['ai', 'ai_agent']:
+                        participant_id = participant.get('id')
+                        if not participant_id:
+                            continue
+                        if get_agent_runner(participant_id, session_id) is None:
+                            register_agent_runner(
+                                participant_id=participant_id,
+                                session_id=session_id,
+                                experiment_type=experiment_type,
+                                participant_role=participant.get('role'),
+                            )
+                            print(f'[Session] Re-registered missing agent runner for participant {participant_id} in session {session_id}')
                         start_agent_runner(
-                            participant_id=participant.get('id'),
+                            participant_id=participant_id,
                             session_id=session_id
                         )
-                        print(f'[Session] Started agent runner for participant {participant.get("id")} in session {session_id}')
-                        agent_participant_ids.append(participant.get('id'))
+                        print(f'[Session] Started agent runner for participant {participant_id} in session {session_id}')
+                        agent_participant_ids.append(participant_id)
                 
                 # For hiddenprofile experiment, trigger initial vote for all agents
                 # If no human participants, trigger immediately

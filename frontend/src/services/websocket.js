@@ -308,6 +308,45 @@ export function sendMessage(sessionId, sender, receiver, content, options = {}) 
 // Store callbacks for message received listeners
 const messageReceivedCallbacks = new Map()
 
+const mentalModelUpdatedCallbacks = new Map()
+const mentalModelUpdateErrorCallbacks = new Map()
+
+export function onMentalModelUpdated(callback) {
+  const ws = getSocket()
+  if (!ws) return () => {}
+  const wrappedCallback = (payload) => callback(payload)
+  mentalModelUpdatedCallbacks.set(callback, wrappedCallback)
+  ws.on('mental_model_updated', wrappedCallback)
+  return () => {
+    ws.off('mental_model_updated', wrappedCallback)
+    mentalModelUpdatedCallbacks.delete(callback)
+  }
+}
+
+export function emitMentalModelUpdate(sessionId, sender, baseRevision, fields) {
+  const ws = getSocket()
+  if (!ws?.connected) return false
+  ws.emit('mental_model_update', {
+    session_id: sessionId,
+    sender,
+    base_revision: baseRevision,
+    fields,
+  })
+  return true
+}
+
+export function onMentalModelUpdateError(callback) {
+  const ws = getSocket()
+  if (!ws) return () => {}
+  const wrappedCallback = (payload) => callback(payload)
+  mentalModelUpdateErrorCallbacks.set(callback, wrappedCallback)
+  ws.on('mental_model_update_error', wrappedCallback)
+  return () => {
+    ws.off('mental_model_update_error', wrappedCallback)
+    mentalModelUpdateErrorCallbacks.delete(callback)
+  }
+}
+
 // Listen for incoming messages
 export function onMessageReceived(callback) {
   const ws = getSocket()
@@ -399,4 +438,3 @@ export function offTypingIndicator(callback) {
 
 // Export socket for direct access if needed
 export { socket }
-

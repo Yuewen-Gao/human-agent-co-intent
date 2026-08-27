@@ -5,7 +5,8 @@ import TradeFeed from '../components/trade_feed.vue'
 import TradeForm from '../components/TradeForm.vue'
 import BaseComponent from '../components/BaseComponent.vue'
 import MeetingRoom from '../components/MeetingRoom.vue'
-import { sendMessage as wsSendMessage, getSocket, onMessageReceived, offMessageReceived, emitTypingIndicator, onTypingIndicator } from '../services/websocket.js'
+import MentalModelPanel from '../views/mental_model_panel.vue'
+import { sendMessage as wsSendMessage, getSocket, onMessageReceived, offMessageReceived, emitTypingIndicator, onTypingIndicator, onMentalModelUpdated, emitMentalModelUpdate, onMentalModelUpdateError } from '../services/websocket.js'
 import { captureActionContextSafe } from '../composables/useActionCapture.js'
 
 const props = defineProps({
@@ -177,6 +178,49 @@ const sessionId = computed(() => {
     }
     return null
 })
+
+const mentalModel = ref({ revision: 0, fields: {} })
+
+const setMentalModel = (candidate) => {
+    if (!candidate || typeof candidate !== 'object') return
+    const fields = {}
+    if (candidate.fields && typeof candidate.fields === 'object') {
+        for (const [key, rawValue] of Object.entries(candidate.fields)) {
+            const value = rawValue && typeof rawValue === 'object' ? rawValue.value : rawValue
+            if (typeof value === 'string') fields[key] = value
+        }
+    }
+    mentalModel.value = {
+        revision: Number.isInteger(candidate.revision) ? candidate.revision : 0,
+        fields,
+    }
+}
+
+const loadMentalModel = async () => {
+    if (!sessionId.value) return
+    try {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId.value)}`)
+        if (!response.ok) return
+        const session = await response.json()
+        setMentalModel(session.mental_model)
+    } catch (error) {
+        console.warn('[SocialPanel] Unable to load mental model:', error)
+    }
+}
+
+const handleMentalModelUpdated = (payload) => {
+    if (payload?.session_id !== sessionId.value) return
+    setMentalModel(payload.mental_model)
+}
+
+const handleMentalModelFieldEdit = ({ key, value }) => {
+    if (!sessionId.value || !myParticipantId.value || typeof key !== 'string') return
+    mentalModel.value = {
+        revision: mentalModel.value.revision,
+        fields: { ...mentalModel.value.fields, [key]: value },
+    }
+    emitMentalModelUpdate(sessionId.value, myParticipantId.value, mentalModel.value.revision, { [key]: value })
+}
 
 const otherParticipants = computed(() => {
     if (!Array.isArray(props.participantsList)) return []
@@ -1006,9 +1050,14 @@ watch(otherParticipants, (newParticipants) => {
 // Register WebSocket message listener on mount
 let cleanupMessageListener = null
 let cleanupTypingListener = null
+let cleanupMentalModelListener = null
+let cleanupMentalModelErrorListener = null
 onMounted(() => {
     cleanupMessageListener = onMessageReceived(handleMessageReceived)
     cleanupTypingListener = onTypingIndicator(handleTypingIndicatorEvent)
+    cleanupMentalModelListener = onMentalModelUpdated(handleMentalModelUpdated)
+    cleanupMentalModelErrorListener = onMentalModelUpdateError(loadMentalModel)
+    loadMentalModel()
     
     // Auto-select first participant on mount if available
     if (isVisible.value && otherParticipants.value.length > 0 && !selectedParticipantId.value) {
@@ -1027,6 +1076,12 @@ onUnmounted(() => {
     if (cleanupTypingListener) {
         cleanupTypingListener()
     }
+    if (cleanupMentalModelListener) {
+        cleanupMentalModelListener()
+    }
+    if (cleanupMentalModelErrorListener) {
+        cleanupMentalModelErrorListener()
+    }
     Object.keys(remoteTypingTimers).forEach((k) => {
         clearTimeout(remoteTypingTimers[k])
         delete remoteTypingTimers[k]
@@ -1037,7 +1092,8 @@ onUnmounted(() => {
 
 <template>
   <div class="social-panel-root">
-    <Panel v-if="isVisible" :header="'Participants'" :description="config.description || 'View and interact with other participants.'" class="participant-list participant-panel-sidebar">
+    <div class="social-sidebar">
+      <Panel v-if="isVisible" flex="0 0 auto" :header="'Participants'" :description="config.description || 'View and interact with other participants.'" class="participant-list participant-panel-sidebar">
         <div class="participants-list">
             <div
                 v-for="p in otherParticipants"
@@ -1057,7 +1113,13 @@ onUnmounted(() => {
                 No other participants
             </div>
         </div>
-    </Panel>
+      </Panel>
+      <MentalModelPanel
+        class="mental-model-sidebar"
+        :model-value="mentalModel.fields"
+        @field-edit="handleMentalModelFieldEdit"
+      />
+    </div>
     <div class="interaction-box">
         <div class="tab-header">
             <button
@@ -1281,10 +1343,20 @@ onUnmounted(() => {
     gap: 10px;
     align-items: stretch;
 }
-.social-panel-root :deep(.participant-panel-sidebar) {
+.social-sidebar {
     flex: 0 1 40%;
     max-width: 48%;
     min-width: 140px;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.social-sidebar :deep(.participant-panel-sidebar) {
+    flex: 0 0 auto;
+}
+.mental-model-sidebar {
+    flex: 0 1 auto;
 }
 .interaction-box {
     width: 100%;
@@ -1678,12 +1750,11 @@ onUnmounted(() => {
 .participant-list {
     display: flex;
     flex-direction: column;
-    height: 100%;
-    min-height: 0;
+    height: auto;
 }
 
 .participant-list :deep(.panel-container) {
-    height: 100%;
+    height: auto;
     margin-bottom: 0;
 }
 

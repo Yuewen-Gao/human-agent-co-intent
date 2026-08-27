@@ -9,7 +9,7 @@ except ImportError:
 from flask import Flask, render_template, jsonify
 from flask_socketio import SocketIO
 from flask_cors import CORS
-from routes.session import session_bp, hydrate_sessions_from_db
+from routes.session import session_bp, hydrate_sessions_from_db, restore_running_agent_runners
 from routes.participant import participant_bp
 from routes.mturk import mturk_bp
 from routes.realtime_routes import realtime_bp
@@ -38,6 +38,10 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 from websocket import handlers
 # Register handlers with socketio instance
 handlers.register_handlers(socketio)
+
+# Agent runners are in-memory. Restore those belonging to persisted sessions that
+# were already running only after Socket.IO is ready to receive agent emissions.
+restore_running_agent_runners()
 
 # Start production service to monitor and complete productions
 from services.production_service import start_production_service
