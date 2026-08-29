@@ -1546,6 +1546,7 @@ def update_map_progress(session_identifier, participant_id):
 
         if 'experiment_params' not in participant:
             participant['experiment_params'] = {}
+        previous_progress = participant['experiment_params'].get('map_progress')
         participant['experiment_params']['map_progress'] = map_progress
 
         session_module.commit_session(session_key, found_session)
@@ -1557,6 +1558,25 @@ def update_map_progress(session_identifier, participant_id):
             session_info=found_session,
             update_type='partial'
         )
+
+        # Wake the Guide only when the follower's actual drawing changed.
+        from agent.map_task.event_trigger import follower_trajectory_event_key
+        previous_key = follower_trajectory_event_key(previous_progress or {})
+        event_key = follower_trajectory_event_key(map_progress)
+        if event_key and event_key != previous_key:
+            from agent.agent_runner import get_agent_runner
+            for candidate in participants_list:
+                candidate_id = candidate.get('id') or candidate.get('participant_id')
+                candidate_role = str(candidate.get('role') or '').lower()
+                candidate_type = str(candidate.get('type') or '').lower()
+                if (
+                    candidate_id
+                    and candidate_role == 'guide'
+                    and candidate_type in ('ai', 'ai_agent')
+                ):
+                    runner = get_agent_runner(candidate_id, broadcast_session_id)
+                    if runner:
+                        runner.request_perception(event_key=event_key)
 
         return jsonify({'success': True, 'map_progress': map_progress}), 200
 

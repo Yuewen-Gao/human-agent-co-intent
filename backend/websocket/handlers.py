@@ -396,7 +396,7 @@ def register_handlers(socketio):
                     if is_agent and can_see_message:
                         runner = get_agent_runner(participant_id, actual_session_id)
                         if runner:
-                            runner.request_perception()
+                            runner.request_perception(event_key=f"message:{message['id']}")
 
             # Action log (human only gets screenshot/html_snapshot)
             from services.action_logger import log_action

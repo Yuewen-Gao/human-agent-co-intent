@@ -1,0 +1,71 @@
+label,family,rank,status,grounding_unit_no,follower_evidence,guide_response,guide_labels
+H1,H,1.0,candidate,35_6,,"oh try to club this : "" { "" the shape of this .. but the curve of vertical "" ~ """,H=H1; R=R6; M=M1; UW=W11
+H1,H,2.0,candidate,2_1,,go down from the dino bones towards the volcano,H=H1; R=R6; M=M1; UW=W3
+H1,H,3.0,candidate,17_8,,Oop the curve here is a little smoother,H=H1; R=R6; M=M2; UW=W3
+H2,H,1.0,candidate,15_3,,if u want we can proceed with that as well,H=H2; R=R3
+H2,H,2.0,candidate,10_3,,"all the way to the bottom right,",H=H2; R=R6; M=M1; UW=W3
+H2,H,3.0,candidate,15_4,,I think we are pretty much done?,H=H2; R=R7
+H3,H,1.0,candidate,6_3,,"well I think so, the only difference is that the pyramid is at the bottom while the yours on the top left",H=H3; R=R4; M=M3; UW=W6
+H3,H,2.0,candidate,4_5,,"To be honest, I think it's not perfect on one of the small parts, but it's still pretty good overall.",H=H3
+H3,H,3.0,candidate,35_5,,"oh no we shifted to the left ,.. the previous shape was perfect , just a little more to the right",H=H3; R=R4; M=M3; UW=W11
+H4,H,1.0,candidate,35_2,,"oh its a straight line so try to be as staright as possible! and once you draw the line between start and that point, you can erase the imaginary lines",W=W3; H=H4; R=R6; M=M1; UW=W3
+H4,H,2.0,candidate,13_3,,Okay so few more things then the path around the volcano it has to curve a bit more to the left almost come to the centre,W=W3; H=H4; R=R6
+H4,H,3.0,candidate,13_5,,"oky you erased it thats fine, the main issue with the one you erased is that the start point needs to change a little",H=H4; R=R4
+H5,H,1.0,candidate,20_3,,"Hmm the circle is a bit small, remeber we imagining that the pyramid is at the bottom right of the forest, the circle is supposed to go all around both the forest and pyramid.",H=H5; R=R4; M=M3; UW=W3
+H5,H,2.0,candidate,4_2,,"So your ""pyramid"" is misplaced. Pyramid is supposed to be at the southeast conor of the forest. Once you move the pyramid over, it should be in the same level with igloo",H=H5; R=R4; M=M3; UW=W6
+H5,H,3.0,candidate,35_7,,oh no.. a bit more to the right.. like imagine the vertical line from the right side of the diagram of bridge.. where the diagram ends,H=H5; R=R4; M=M3; UW=W11
+H6,H,1.0,candidate,10_1,yes yes,you need to draw a line between dinosaur bones and vocano 45 degree line from top right to left,H=H6
+H7,H,1.0,candidate,20_5,,we pretty much done man,H=H7
+R1,R,,no_real_example,,,,
+R2,R,1.0,candidate,13_2,,Do you see the start point the x mark on your map at all?,R=R2
+R3,R,1.0,candidate,15_3,,if u want we can proceed with that as well,H=H2; R=R3
+R3,R,2.0,candidate,6_3,,I think go around,R=R3; M=M1; UW=W3
+R3,R,3.0,candidate,17_9,,Maybe yes?,R=R3; M=M5
+R4,R,1.0,candidate,35_9,,ohhhh i got a better shape .. you know the shape of an umbrella handle .. like the good old school umbrellas which had a curve ... it is similar to the christmas decoration sweets we put on christmas tree,R=R4; M=M3; UW=W11
+R4,R,2.0,candidate,20_3,,"Hmm the circle is a bit small, remeber we imagining that the pyramid is at the bottom right of the forest, the circle is supposed to go all around both the forest and pyramid.",H=H5; R=R4; M=M3; UW=W3
+R4,R,3.0,candidate,4_2,,"So your ""pyramid"" is misplaced. Pyramid is supposed to be at the southeast conor of the forest. Once you move the pyramid over, it should be in the same level with igloo",H=H5; R=R4; M=M3; UW=W6
+R5,R,1.0,candidate,4_5,,Do you want to try to fix that small part? So we should just call it a day?,R=R5
+R5,R,2.0,candidate,17_7,,Can we do 2 minor tweaks,W=W3; R=R5; M=M1; UW=W3
+R5,R,3.0,candidate,10_5,,try curvy line,R=R5
+R6,R,1.0,candidate,35_6,,so you need to connect these two points but the shape we want essentially the same as the right side we just did.. just soother.... okay imagine this was a egg.. the lower curve of an egg is what you need between these two points,R=R6; M=M2; UW=W11
+R6,R,2.0,candidate,36_8,,"The same thing u did to head down, just do that to head up toward the finish, ohh I just realised the finsh wasn't pointed out on your map. The finish point is exactly below the suspension bridge",R=R6; M=M1; UW=W8
+R6,R,3.0,candidate,35_2,,"oh its a straight line so try to be as staright as possible! and once you draw the line between start and that point, you can erase the imaginary lines",W=W3; H=H4; R=R6; M=M1; UW=W3
+R7,R,1.0,candidate,15_4,,I think we are pretty much done?,H=H2; R=R7
+R7,R,2.0,candidate,17_9,,I think we did well????,H=H2; R=R7
+UW1,UW,1.0,candidate,4_5,,"So it's the slope of the right line of this upsidedown U shape you just draw. Right now, if you look at the right line, it's almost like a straightline, but the direction of this slope is good. it's just the slope is too steep",M=M2; UW=W1
+UW2,UW,1.0,candidate,13_2,,"So the start point is right of bones, it comes down towards the volcano but it goes around it on the left side and then after crossing the volcano it goes complete to the right side",W=W3; M=M1; UW=W2
+UW2,UW,2.0,candidate,37_1,Hello!,i think you are supposed to draw the pyramid landmark next to igloo,R=R4; M=M3; UW=W2
+UW2,UW,3.0,candidate,11_5,,the finish stop is in the middle point of and under the bridge,R=R4; M=M1; UW=W2
+UW3,UW,1.0,candidate,20_2,like this?,"Okay this works, then the next move, is to head towards the right of the forest, and then we gonna imgine that the pyramid is below the forest and make a journey encompassing the forest and pyramid from the right of the forest down we gonna draw a circle to the left of the forest",M=M4; UW=W3
+UW3,UW,2.0,candidate,20_3,,"Hmm the circle is a bit small, remeber we imagining that the pyramid is at the bottom right of the forest, the circle is supposed to go all around both the forest and pyramid.",H=H5; R=R4; M=M3; UW=W3
+UW3,UW,3.0,candidate,35_2,,"oh its a straight line so try to be as staright as possible! and once you draw the line between start and that point, you can erase the imaginary lines",W=W3; H=H4; R=R6; M=M1; UW=W3
+UW4,UW,1.0,candidate,10_7,,"you are gettting close, you can retrace the route, and make sure all the turning point is curvey and smoothly turn",W=W3; H=H5; R=R6; M=M1; UW=W4
+UW4,UW,2.0,candidate,11_4,,wait the bottom of the U is above the top of the igloo,H=H4; R=R4; M=M3; UW=W4
+UW4,UW,3.0,candidate,37_5,,awesome! i think we are done!,M=M4; UW=W4
+UW5,UW,,no_real_example,,,,
+UW6,UW,1.0,candidate,4_2,,"So your ""pyramid"" is misplaced. Pyramid is supposed to be at the southeast conor of the forest. Once you move the pyramid over, it should be in the same level with igloo",H=H5; R=R4; M=M3; UW=W6
+UW6,UW,2.0,candidate,17_2,,Would you be able to draw like a triangle to mark the pyramid's correct location? It's under the forest but slightly on the right,R=R6; M=M2; UW=W6
+UW6,UW,3.0,candidate,6_3,,"well I think so, the only difference is that the pyramid is at the bottom while the yours on the top left",H=H3; R=R4; M=M3; UW=W6
+UW7,UW,1.0,candidate,4_3,,oh okkkk.,M=M4; UW=W7
+UW8,UW,1.0,candidate,36_8,,"The same thing u did to head down, just do that to head up toward the finish, ohh I just realised the finsh wasn't pointed out on your map. The finish point is exactly below the suspension bridge",R=R6; M=M1; UW=W8
+UW8,UW,2.0,candidate,36_10,,Yeah it is,M=M4; UW=W8
+UW9,UW,,no_real_example,,,,
+UW10,UW,1.0,candidate,37_3,,hey i dont know why the messages are not going through,R=R4; M=M1; UW=W10
+UW11,UW,1.0,candidate,35_6,,so you need to connect these two points but the shape we want essentially the same as the right side we just did.. just soother.... okay imagine this was a egg.. the lower curve of an egg is what you need between these two points,R=R6; M=M2; UW=W11
+UW11,UW,2.0,candidate,35_9,,ohhhh i got a better shape .. you know the shape of an umbrella handle .. like the good old school umbrellas which had a curve ... it is similar to the christmas decoration sweets we put on christmas tree,R=R4; M=M3; UW=W11
+UW11,UW,3.0,candidate,35_7,,oh no.. a bit more to the right.. like imagine the vertical line from the right side of the diagram of bridge.. where the diagram ends,H=H5; R=R4; M=M3; UW=W11
+UW12,UW,,no_real_example,,,,
+M1,M,1.0,candidate,36_8,,"The same thing u did to head down, just do that to head up toward the finish, ohh I just realised the finsh wasn't pointed out on your map. The finish point is exactly below the suspension bridge",R=R6; M=M1; UW=W8
+M1,M,2.0,candidate,13_2,,"So the start point is right of bones, it comes down towards the volcano but it goes around it on the left side and then after crossing the volcano it goes complete to the right side",W=W3; M=M1; UW=W2
+M1,M,3.0,candidate,35_2,,"oh its a straight line so try to be as staright as possible! and once you draw the line between start and that point, you can erase the imaginary lines",W=W3; H=H4; R=R6; M=M1; UW=W3
+M2,M,1.0,candidate,35_6,,so you need to connect these two points but the shape we want essentially the same as the right side we just did.. just soother.... okay imagine this was a egg.. the lower curve of an egg is what you need between these two points,R=R6; M=M2; UW=W11
+M2,M,2.0,candidate,4_5,,"So it's the slope of the right line of this upsidedown U shape you just draw. Right now, if you look at the right line, it's almost like a straightline, but the direction of this slope is good. it's just the slope is too steep",M=M2; UW=W1
+M2,M,3.0,candidate,35_9,,the shape is perfect.. just the bulge is towards the left side of the finish point.. right now we are straight .. we need it leaning toward the left,R=R6; M=M2; UW=W11
+M3,M,1.0,candidate,35_9,,ohhhh i got a better shape .. you know the shape of an umbrella handle .. like the good old school umbrellas which had a curve ... it is similar to the christmas decoration sweets we put on christmas tree,R=R4; M=M3; UW=W11
+M3,M,2.0,candidate,20_3,,"Hmm the circle is a bit small, remeber we imagining that the pyramid is at the bottom right of the forest, the circle is supposed to go all around both the forest and pyramid.",H=H5; R=R4; M=M3; UW=W3
+M3,M,3.0,candidate,4_2,,"So your ""pyramid"" is misplaced. Pyramid is supposed to be at the southeast conor of the forest. Once you move the pyramid over, it should be in the same level with igloo",H=H5; R=R4; M=M3; UW=W6
+M4,M,1.0,candidate,20_2,like this?,"Okay this works, then the next move, is to head towards the right of the forest, and then we gonna imgine that the pyramid is below the forest and make a journey encompassing the forest and pyramid from the right of the forest down we gonna draw a circle to the left of the forest",M=M4; UW=W3
+M4,M,2.0,candidate,11_2,,it takes time to text so be patient. yeah you doing great. and the draw a 'n'. the n should noot beyond the top ogf the forrest.,"R=R6; M=M2,M4; UW=W3"
+M4,M,3.0,candidate,35_6,,"perfect! now the shape we want joining these two points is like "" { "" the bottom half of this icon",M=M4; UW=W11
+M5,M,1.0,candidate,13_8,,Awesome I think this works,M=M5
+M5,M,2.0,candidate,17_9,,Maybe yes?,R=R3; M=M5

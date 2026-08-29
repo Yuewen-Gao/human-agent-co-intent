@@ -12,7 +12,7 @@ _POLICY_PATH = (
 )
 
 # Change this flag directly to enable the c2 grounding-treatment prompt.
-ENABLE_GROUNDING_POLICY = False
+ENABLE_GROUNDING_POLICY = True
 
 
 def append_grounding_policy_if_enabled(

@@ -8,7 +8,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from werkzeug.utils import secure_filename
 
@@ -45,20 +45,8 @@ def resolve_maptask_map_file_path(map_obj: Any) -> Optional[str]:
     return None
 
 
-def guide_map_data_url_for_openai_vision(
-    participant: Dict[str, Any], experiment_type: str
-) -> Optional[str]:
-    """
-    Build a data: URL (base64) for the guide's assigned map image, for use in
-    chat.completions image_url.url (OpenAI / Azure OpenAI vision).
-    """
-    if (experiment_type or "").strip().lower() != "maptask":
-        return None
-    role = (participant.get("role") or "").strip().lower()
-    if role != "guide":
-        return None
-    exp = participant.get("experiment_params") or {}
-    map_obj = exp.get("map")
+def _map_data_url(map_obj: Any) -> Optional[str]:
+    """Encode one assigned raster map as an OpenAI-compatible data URL."""
     path = resolve_maptask_map_file_path(map_obj)
     if not path:
         return None
@@ -75,3 +63,48 @@ def guide_map_data_url_for_openai_vision(
     mime = mimetypes.guess_type(path)[0] or "image/png"
     b64 = base64.standard_b64encode(raw).decode("ascii")
     return f"data:{mime};base64,{b64}"
+
+
+def map_data_urls_for_openai_vision(
+    session: Mapping[str, Any], experiment_type: str
+) -> List[Dict[str, str]]:
+    """Return the Guide and Follower map images in a stable role-labelled order.
+
+    Both maps are needed for Map Task because landmarks refer to the same
+    entities while their positions can differ between the two maps.  A missing
+    or non-raster map is omitted rather than preventing the agent from acting.
+    """
+    if (experiment_type or "").strip().lower() != "maptask":
+        return []
+
+    maps_by_role: Dict[str, Any] = {}
+    for participant in session.get("participants") or []:
+        if not isinstance(participant, Mapping):
+            continue
+        role = str(participant.get("role") or "").strip().lower()
+        if role not in {"guide", "follower"} or role in maps_by_role:
+            continue
+        exp = participant.get("experiment_params")
+        map_obj = exp.get("map") if isinstance(exp, Mapping) else None
+        if map_obj:
+            maps_by_role[role] = map_obj
+
+    inputs: List[Dict[str, str]] = []
+    for role in ("guide", "follower"):
+        data_url = _map_data_url(maps_by_role.get(role))
+        if data_url:
+            inputs.append({"role": role, "data_url": data_url})
+    return inputs
+
+
+def guide_map_data_url_for_openai_vision(
+    participant: Dict[str, Any], experiment_type: str
+) -> Optional[str]:
+    """Backward-compatible helper for callers that only need a Guide image."""
+    if (experiment_type or "").strip().lower() != "maptask":
+        return None
+    role = (participant.get("role") or "").strip().lower()
+    if role != "guide":
+        return None
+    exp = participant.get("experiment_params") or {}
+    return _map_data_url(exp.get("map") if isinstance(exp, Mapping) else None)

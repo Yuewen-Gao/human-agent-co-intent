@@ -156,9 +156,9 @@ def route_grid_from_canvas_data_url(
     """Convert a live follower canvas PNG data URL into an ``x``/``.`` grid.
 
     The browser syncs ``canvasDataUrl`` into the follower's ``map_progress``.
-    This function uses the same 810x1180 projection and trajectory-cell rule as
-    the offline ALMANAC formatting script, so the live drawing grid shares the
-    coordinate system of ``almanac_maps/map_guide.json``.
+    This function normalizes the follower canvas to a 60x40 grid for compact
+    trajectory context.  The result remains in the Follower map's coordinate
+    system and must not be compared cell-for-cell with the Guide map grid.
     """
     if not isinstance(canvas_data_url, str) or not canvas_data_url.startswith("data:image/"):
         return ""
