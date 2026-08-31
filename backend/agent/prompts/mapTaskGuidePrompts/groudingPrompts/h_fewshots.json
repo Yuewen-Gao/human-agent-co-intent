@@ -1,0 +1,602 @@
+[
+  {
+    "example_id": "H1-C2-01",
+    "h_code": "H1",
+    "h_name": "other_initiated_repair",
+    "status": "production_ready",
+    "source": {
+      "workbook": "/Users/yuewengao/NEU HAI/all_chronological.xlsx",
+      "sheet": "updated",
+      "condition": "c2",
+      "study_name": "study36",
+      "split": "test",
+      "grounding_unit_no": "36_8",
+      "focal_timestamp": "2026-05-16T21:51:22.797216Z",
+      "focal_excel_row": 2759,
+      "conversation_excel_rows": [2756, 2757, 2759, 2760],
+      "map_action_excel_rows": [2758]
+    },
+    "focal_evidence": {
+      "type": "utterance",
+      "description": "The follower explicitly asks which finish line the Guide means."
+    },
+    "evidence_channels": {
+      "visible_conversation": true,
+      "guide_map_grid": false,
+      "follower_current_workspace": false,
+      "current_task_state": false,
+      "explicit_working_interpretation": false
+    },
+    "visible_conversation": [
+      {
+        "phase": "before",
+        "excel_row": 2756,
+        "timestamp": "2026-05-16T21:48:36.276257Z",
+        "role": "guide",
+        "utterance": "Now, the next destination is the final destination, which is the finish point. But to get there, Im skipping a destination, but beacsue it's short Ill describe it all in one go, and if there's need to break it down, just ask I would. The next destination is the top of the Igloo from where we are we just gonna head to the top of the igloo when we get there, then we start heading towards the finish line.      So we head to the top of the igloo next which means we are gonna go down from where we are right now for a bit, and wjhere we stop really close to the top of the igloo we start heading back up to the finsih poitn. but one important point is that we can just make sharp turns like exactly from the left side of the forest we can just put a ruler and draw a stright line towards the top of the igloo and then do the same towards the finsh line, so instead of those sharp point created by a sudden turn, lets make it a bit curvy, like before we go down from the left of the forest to the top of the igloo we gonna make a slight curve then down and another slight curve then up mtowards the finish line so its not gonna look let the sharp turn at the we usually make bottom of a V looking road instead it's gonna like like the turn we make at a U looking road",
+        "used_for_detection": true
+      },
+      {
+        "phase": "before",
+        "excel_row": 2757,
+        "timestamp": "2026-05-16T21:49:04.171968Z",
+        "role": "guide",
+        "utterance": "Damn this is kinda long, I decided to describe it all inone go, jsut ask any question you have",
+        "used_for_detection": true
+      },
+      {
+        "phase": "focal",
+        "excel_row": 2759,
+        "timestamp": "2026-05-16T21:51:22.797216Z",
+        "role": "follower",
+        "utterance": "where is finish line are you talking about?",
+        "used_for_detection": true
+      },
+      {
+        "phase": "after",
+        "excel_row": 2760,
+        "timestamp": "2026-05-16T21:52:42.433123Z",
+        "role": "guide",
+        "utterance": "The same thing u did to head down, just do that to head up toward the finish, ohh I just realised the finsh wasn't pointed out on your map. The finish point is exactly below the suspension bridge",
+        "used_for_detection": false
+      }
+    ],
+    "guide_map_evidence": null,
+    "follower_workspace_evidence": null,
+    "current_task_state_evidence": null,
+    "cross_channel_comparison": null,
+    "annotation_review": {
+      "original_h_annotation": "H1. other_initiated_repair",
+      "current_codebook_h": "H1",
+      "codebook_conflict": false,
+      "conflict_explanation": null
+    },
+    "boundary_review": {
+      "nearest_alternative_h": "H6",
+      "why_primary_h_is_better": "The focal utterance requests specification of an identified missing referent rather than explicitly reporting the follower's own uncertainty."
+    },
+    "observable_evidence_summary": "The follower explicitly requests clarification of the Guide's finish-line referent. No private rationale or later message is required.",
+    "expected_detector_output": {
+      "h_code": "H1",
+      "confidence": "high",
+      "evidence": "The follower explicitly asks which finish line the Guide means, requesting clarification of the prior instruction."
+    },
+    "selection_review": {
+      "agent_visibility_verified": true,
+      "temporal_alignment_verified": true,
+      "utterances_are_verbatim": true,
+      "future_evidence_required": false,
+      "private_rationale_required": false,
+      "duplicate_of": null,
+      "review_notes": "C2 visible conversation alone is sufficient."
+    }
+  },
+  {
+    "example_id": "H3-C2-01",
+    "h_code": "H3",
+    "h_name": "incompatible_public_response",
+    "status": "production_ready",
+    "source": {
+      "workbook": "/Users/yuewengao/NEU HAI/all_chronological.xlsx",
+      "sheet": "updated",
+      "condition": "c2",
+      "study_name": "study4",
+      "split": "train",
+      "grounding_unit_no": "4_3",
+      "focal_timestamp": "2026-05-01T00:33:31.347193Z",
+      "focal_excel_row": 2859,
+      "conversation_excel_rows": [2858, 2859, 2860, 2861],
+      "map_action_excel_rows": []
+    },
+    "focal_evidence": {
+      "type": "utterance",
+      "description": "The follower publicly states that the requested UI action cannot be performed."
+    },
+    "evidence_channels": {
+      "visible_conversation": true,
+      "guide_map_grid": false,
+      "follower_current_workspace": false,
+      "current_task_state": false,
+      "explicit_working_interpretation": false
+    },
+    "visible_conversation": [
+      {
+        "phase": "before",
+        "excel_row": 2858,
+        "timestamp": "2026-05-01T00:33:02.339832Z",
+        "role": "guide",
+        "utterance": "How about you fix this first? And then we can start to draw the line?",
+        "used_for_detection": true
+      },
+      {
+        "phase": "focal",
+        "excel_row": 2859,
+        "timestamp": "2026-05-01T00:33:31.347193Z",
+        "role": "follower",
+        "utterance": "Ohhh I think the host says I cannot fix it in the UI.",
+        "used_for_detection": true
+      },
+      {
+        "phase": "after",
+        "excel_row": 2860,
+        "timestamp": "2026-05-01T00:33:47.833217Z",
+        "role": "follower",
+        "utterance": "We just have to figure out ourselves.",
+        "used_for_detection": false
+      },
+      {
+        "phase": "after",
+        "excel_row": 2861,
+        "timestamp": "2026-05-01T00:33:48.096296Z",
+        "role": "guide",
+        "utterance": "oh okkkk.",
+        "used_for_detection": false
+      }
+    ],
+    "guide_map_evidence": null,
+    "follower_workspace_evidence": null,
+    "current_task_state_evidence": null,
+    "cross_channel_comparison": null,
+    "annotation_review": {
+      "original_h_annotation": "H3. incompatible_public_response",
+      "current_codebook_h": "H3",
+      "codebook_conflict": false,
+      "conflict_explanation": null
+    },
+    "boundary_review": {
+      "nearest_alternative_h": "H4",
+      "why_primary_h_is_better": "The focal cue is a public response incompatible with the immediately requested operation, not a visible route or trajectory deviation."
+    },
+    "observable_evidence_summary": "The Guide asks the follower to fix the landmark first. The follower publicly states that the UI does not permit that requested action.",
+    "expected_detector_output": {
+      "h_code": "H3",
+      "confidence": "high",
+      "evidence": "The Guide asks the follower to fix the landmark first, but the follower publicly states that the UI does not permit that action."
+    },
+    "selection_review": {
+      "agent_visibility_verified": true,
+      "temporal_alignment_verified": true,
+      "utterances_are_verbatim": true,
+      "future_evidence_required": false,
+      "private_rationale_required": false,
+      "duplicate_of": null,
+      "review_notes": "The preceding Guide request and focal follower response are both visible in session conversation."
+    }
+  },
+  {
+    "example_id": "H4-C2-01",
+    "h_code": "H4",
+    "h_name": "action_plan_deviation",
+    "status": "production_ready",
+    "source": {
+      "workbook": "/Users/yuewengao/NEU HAI/all_chronological.xlsx",
+      "sheet": "updated",
+      "condition": "c2",
+      "study_name": "study15",
+      "split": "test",
+      "grounding_unit_no": "15_1",
+      "focal_timestamp": "2026-05-02T23:16:35.427711Z",
+      "focal_excel_row": 1852,
+      "conversation_excel_rows": [1846, 1850, 1852, 1853],
+      "map_action_excel_rows": [1852]
+    },
+    "focal_evidence": {
+      "type": "cross_channel",
+      "description": "The current visible route trace uses the right side of volcano while the active Guide route segment requires the left side."
+    },
+    "evidence_channels": {
+      "visible_conversation": true,
+      "guide_map_grid": true,
+      "follower_current_workspace": true,
+      "current_task_state": false,
+      "explicit_working_interpretation": false
+    },
+    "visible_conversation": [
+      {
+        "phase": "before",
+        "excel_row": 1846,
+        "timestamp": "2026-05-02T23:10:48.312303Z",
+        "role": "guide",
+        "utterance": "so the finish point is suspension bridge on the map",
+        "used_for_detection": true
+      },
+      {
+        "phase": "before",
+        "excel_row": 1850,
+        "timestamp": "2026-05-02T23:11:06.341622Z",
+        "role": "guide",
+        "utterance": "and to reach that we go down around the volcano",
+        "used_for_detection": true
+      },
+      {
+        "phase": "focal",
+        "excel_row": 1852,
+        "timestamp": "2026-05-02T23:16:35.427711Z",
+        "role": "guide",
+        "utterance": "that's a nice start, though the path goes around the left side of the volcano",
+        "used_for_detection": true
+      },
+      {
+        "phase": "after",
+        "excel_row": 1853,
+        "timestamp": "2026-05-02T23:16:53.183944Z",
+        "role": "guide",
+        "utterance": "it's like the letter S, first going around the volcano, then around the forest at the bottom",
+        "used_for_detection": false
+      }
+    ],
+    "guide_map_evidence": {
+      "relevant_landmarks": ["volcano", "forest", "suspension bridge"],
+      "current_intended_segment": "From the start, descend around the left side of volcano before continuing toward forest and suspension bridge.",
+      "target_relation": "The target route passes on the left side of volcano.",
+      "source": "backend/almanac_maps/map_guide.json"
+    },
+    "follower_workspace_evidence": {
+      "relevant_landmarks": ["volcano"],
+      "current_trajectory_relation": "The visible trajectory descends along the right-side boundary of volcano in the follower workspace.",
+      "observable_action_result": "The route is already committed to the opposite side of the named landmark.",
+      "snapshot_excel_rows": [1852],
+      "snapshot_timestamp": "2026-05-02T23:16:35.427711Z",
+      "snapshot_aligned_with_focal_time": true
+    },
+    "current_task_state_evidence": null,
+    "cross_channel_comparison": {
+      "compared_objects": ["current intended route segment", "follower current trajectory"],
+      "observable_relation": "The intended route uses the left side of volcano, while the visible trajectory uses the right side.",
+      "primary_detection_evidence": "A specific landmark-relative route deviation is visible at the focal time."
+    },
+    "annotation_review": {
+      "original_h_annotation": "H4. action_plan_deviation",
+      "current_codebook_h": "H4",
+      "codebook_conflict": false,
+      "conflict_explanation": null
+    },
+    "boundary_review": {
+      "nearest_alternative_h": "H5",
+      "why_primary_h_is_better": "Volcano is a stable shared landmark; the mismatch is between the intended route and the current follower trace, not between workspace representations."
+    },
+    "observable_evidence_summary": "The active route must pass left of volcano. The focal C2 current-workspace snapshot shows the follower's trace passing on the right side.",
+    "expected_detector_output": {
+      "h_code": "H4",
+      "confidence": "high",
+      "evidence": "The active Guide segment requires the left side of volcano, while the current visible follower trajectory descends on its right side."
+    },
+    "selection_review": {
+      "agent_visibility_verified": true,
+      "temporal_alignment_verified": true,
+      "utterances_are_verbatim": true,
+      "future_evidence_required": false,
+      "private_rationale_required": false,
+      "duplicate_of": null,
+      "review_notes": "Row 1852 contains the contemporaneous C2 workspace snapshot used for the trajectory comparison."
+    }
+  },
+  {
+    "example_id": "H5-C2-01",
+    "h_code": "H5",
+    "h_name": "workspace_representation_conflict",
+    "status": "production_ready",
+    "source": {
+      "workbook": "/Users/yuewengao/NEU HAI/all_chronological.xlsx",
+      "sheet": "updated",
+      "condition": "c2",
+      "study_name": "study22",
+      "split": "train",
+      "grounding_unit_no": "22_2",
+      "focal_timestamp": "2026-05-11T18:13:36.937718Z",
+      "focal_excel_row": 2321,
+      "conversation_excel_rows": [2320, 2321, 2322, 2324, 2325],
+      "map_action_excel_rows": []
+    },
+    "focal_evidence": {
+      "type": "cross_channel",
+      "description": "The active instruction requires pyramid, but the follower cannot locate it and the visible maps place pyramid differently."
+    },
+    "evidence_channels": {
+      "visible_conversation": true,
+      "guide_map_grid": true,
+      "follower_current_workspace": true,
+      "current_task_state": false,
+      "explicit_working_interpretation": false
+    },
+    "visible_conversation": [
+      {
+        "phase": "before",
+        "excel_row": 2320,
+        "timestamp": "2026-05-11T18:13:10.615991Z",
+        "role": "guide",
+        "utterance": "then turn a little bit right pass the forest and the pyrmaid",
+        "used_for_detection": true
+      },
+      {
+        "phase": "focal",
+        "excel_row": 2321,
+        "timestamp": "2026-05-11T18:13:36.937718Z",
+        "role": "follower",
+        "utterance": "Oh where is the pyramid?",
+        "used_for_detection": true
+      },
+      {
+        "phase": "after",
+        "excel_row": 2322,
+        "timestamp": "2026-05-11T18:13:46.502206Z",
+        "role": "guide",
+        "utterance": "wait I think your map is different from mine",
+        "used_for_detection": false
+      },
+      {
+        "phase": "after",
+        "excel_row": 2324,
+        "timestamp": "2026-05-11T18:14:07.031074Z",
+        "role": "follower",
+        "utterance": "Yeah I think [the host] mentioned that we might have different landmarks",
+        "used_for_detection": false
+      },
+      {
+        "phase": "after",
+        "excel_row": 2325,
+        "timestamp": "2026-05-11T18:14:11.054849Z",
+        "role": "guide",
+        "utterance": "on my map pyramid is at right bottom corner",
+        "used_for_detection": false
+      }
+    ],
+    "guide_map_evidence": {
+      "relevant_landmarks": ["forest", "pyramid"],
+      "current_intended_segment": "Turn right and pass forest and pyramid.",
+      "target_relation": "Guide map places pyramid at the lower-right of forest.",
+      "source": "backend/almanac_maps/map_guide.json"
+    },
+    "follower_workspace_evidence": {
+      "relevant_landmarks": ["forest", "pyramid"],
+      "current_trajectory_relation": "No trajectory is required; the follower workspace represents pyramid in a different relation from the Guide map.",
+      "observable_action_result": "The follower cannot locate the pyramid required by the active instruction.",
+      "snapshot_excel_rows": [],
+      "snapshot_timestamp": null,
+      "snapshot_aligned_with_focal_time": true
+    },
+    "current_task_state_evidence": null,
+    "cross_channel_comparison": {
+      "compared_objects": ["Guide workspace representation of pyramid", "Follower workspace representation of pyramid"],
+      "observable_relation": "The active route requires pyramid, but the named landmark is not in the corresponding landmark-relative location in the follower workspace.",
+      "primary_detection_evidence": "The follower's focal question and the current visible map representations jointly reveal the task-relevant conflict."
+    },
+    "annotation_review": {
+      "original_h_annotation": "H5. workspace_representation_conflict",
+      "current_codebook_h": "H5",
+      "codebook_conflict": false,
+      "conflict_explanation": null
+    },
+    "boundary_review": {
+      "nearest_alternative_h": "H4",
+      "why_primary_h_is_better": "No focal trajectory deviation is necessary; the immediate problem is incompatible landmark representation for the next route segment."
+    },
+    "observable_evidence_summary": "The Guide’s active segment requires pyramid, while the follower explicitly cannot locate it. The Guide map and follower workspace provide incompatible task-relevant pyramid relations.",
+    "expected_detector_output": {
+      "h_code": "H5",
+      "confidence": "high",
+      "evidence": "The current instruction depends on pyramid, but the follower cannot locate it and the visible Guide and Follower map representations place that landmark differently."
+    },
+    "selection_review": {
+      "agent_visibility_verified": true,
+      "temporal_alignment_verified": true,
+      "utterances_are_verbatim": true,
+      "future_evidence_required": false,
+      "private_rationale_required": false,
+      "duplicate_of": null,
+      "review_notes": "Static map representations are visible in the runtime prompt; post-focal turns are retained only for audit."
+    }
+  },
+  {
+    "example_id": "H6-C2-01",
+    "h_code": "H6",
+    "h_name": "self_reported_uncertainty",
+    "status": "production_ready",
+    "source": {
+      "workbook": "/Users/yuewengao/NEU HAI/all_chronological.xlsx",
+      "sheet": "updated",
+      "condition": "c2",
+      "study_name": "study35",
+      "split": "train",
+      "grounding_unit_no": "35_6",
+      "focal_timestamp": "2026-05-16T21:03:38.587785Z",
+      "focal_excel_row": 2578,
+      "conversation_excel_rows": [2564, 2567, 2578, 2579],
+      "map_action_excel_rows": []
+    },
+    "focal_evidence": {
+      "type": "utterance",
+      "description": "The follower explicitly reports being confused."
+    },
+    "evidence_channels": {
+      "visible_conversation": true,
+      "guide_map_grid": false,
+      "follower_current_workspace": false,
+      "current_task_state": false,
+      "explicit_working_interpretation": false
+    },
+    "visible_conversation": [
+      {
+        "phase": "before",
+        "excel_row": 2564,
+        "timestamp": "2026-05-16T20:59:40.621463Z",
+        "role": "guide",
+        "utterance": "perfect! now the shape we want joining these two points is like \" { \" the bottom half of this icon",
+        "used_for_detection": true
+      },
+      {
+        "phase": "before",
+        "excel_row": 2567,
+        "timestamp": "2026-05-16T21:02:13.430340Z",
+        "role": "guide",
+        "utterance": "imagine this icon as vertical ... \"~\"",
+        "used_for_detection": true
+      },
+      {
+        "phase": "focal",
+        "excel_row": 2578,
+        "timestamp": "2026-05-16T21:03:38.587785Z",
+        "role": "follower",
+        "utterance": "hah im a bit confused",
+        "used_for_detection": true
+      },
+      {
+        "phase": "after",
+        "excel_row": 2579,
+        "timestamp": "2026-05-16T21:03:45.231456Z",
+        "role": "guide",
+        "utterance": "oh try to club this : \" { \" the shape of this .. but the curve of vertical \" ~ \"",
+        "used_for_detection": false
+      }
+    ],
+    "guide_map_evidence": null,
+    "follower_workspace_evidence": null,
+    "current_task_state_evidence": null,
+    "cross_channel_comparison": null,
+    "annotation_review": {
+      "original_h_annotation": "H6. self_reported_uncertainty",
+      "current_codebook_h": "H6",
+      "codebook_conflict": false,
+      "conflict_explanation": null
+    },
+    "boundary_review": {
+      "nearest_alternative_h": "H1",
+      "why_primary_h_is_better": "The focal message explicitly reports the follower's confusion but does not itself request clarification, repetition, specification, or confirmation."
+    },
+    "observable_evidence_summary": "The follower says they are confused. The H6 decision follows directly from that explicit public self-report.",
+    "expected_detector_output": {
+      "h_code": "H6",
+      "confidence": "high",
+      "evidence": "The follower explicitly says they are confused about the current instruction."
+    },
+    "selection_review": {
+      "agent_visibility_verified": true,
+      "temporal_alignment_verified": true,
+      "utterances_are_verbatim": true,
+      "future_evidence_required": false,
+      "private_rationale_required": false,
+      "duplicate_of": null,
+      "review_notes": "Conversation-only example; later repair is excluded from focal detection."
+    }
+  },
+  {
+    "example_id": "H7-C2-01",
+    "h_code": "H7",
+    "h_name": "not_observed",
+    "status": "production_ready",
+    "source": {
+      "workbook": "/Users/yuewengao/NEU HAI/all_chronological.xlsx",
+      "sheet": "updated",
+      "condition": "c2",
+      "study_name": "study20",
+      "split": "train",
+      "grounding_unit_no": "20_5",
+      "focal_timestamp": "2026-05-07T16:37:01.335216Z",
+      "focal_excel_row": 2304,
+      "conversation_excel_rows": [2301, 2302, 2303, 2304, 2306],
+      "map_action_excel_rows": []
+    },
+    "focal_evidence": {
+      "type": "utterance",
+      "description": "The visible exchange positively closes the task without an H1-H6 cue."
+    },
+    "evidence_channels": {
+      "visible_conversation": true,
+      "guide_map_grid": false,
+      "follower_current_workspace": false,
+      "current_task_state": false,
+      "explicit_working_interpretation": false
+    },
+    "visible_conversation": [
+      {
+        "phase": "before",
+        "excel_row": 2301,
+        "timestamp": "2026-05-07T16:36:49.223405Z",
+        "role": "guide",
+        "utterance": "Perfect 😂",
+        "used_for_detection": true
+      },
+      {
+        "phase": "before",
+        "excel_row": 2302,
+        "timestamp": "2026-05-07T16:36:51.607987Z",
+        "role": "follower",
+        "utterance": "Lmk know if this is right lmao",
+        "used_for_detection": true
+      },
+      {
+        "phase": "before",
+        "excel_row": 2303,
+        "timestamp": "2026-05-07T16:36:58.173873Z",
+        "role": "follower",
+        "utterance": "Ooooo that's amazing",
+        "used_for_detection": true
+      },
+      {
+        "phase": "focal",
+        "excel_row": 2304,
+        "timestamp": "2026-05-07T16:37:01.335216Z",
+        "role": "guide",
+        "utterance": "we pretty much done man",
+        "used_for_detection": true
+      },
+      {
+        "phase": "after",
+        "excel_row": 2306,
+        "timestamp": "2026-05-07T16:37:37.354157Z",
+        "role": "follower",
+        "utterance": "Shall we submit the task then?",
+        "used_for_detection": false
+      }
+    ],
+    "guide_map_evidence": null,
+    "follower_workspace_evidence": null,
+    "current_task_state_evidence": null,
+    "cross_channel_comparison": null,
+    "annotation_review": {
+      "original_h_annotation": "H7. not_observed",
+      "current_codebook_h": "H7",
+      "codebook_conflict": false,
+      "conflict_explanation": null
+    },
+    "boundary_review": {
+      "nearest_alternative_h": "H2",
+      "why_primary_h_is_better": "This is not missing acceptance evidence: the Guide says \"Perfect 😂\" and the participants move toward submission."
+    },
+    "observable_evidence_summary": "The visible dialogue contains positive evaluation and normal task closure. It is not a blank or incomplete record.",
+    "expected_detector_output": {
+      "h_code": "H7",
+      "confidence": "high",
+      "evidence": "The Guide positively evaluates the work and both participants move toward submission; no observable grounding problem is present."
+    },
+    "selection_review": {
+      "agent_visibility_verified": true,
+      "temporal_alignment_verified": true,
+      "utterances_are_verbatim": true,
+      "future_evidence_required": false,
+      "private_rationale_required": false,
+      "duplicate_of": null,
+      "review_notes": "Positive acceptance distinguishes H7 from missing data or ordinary silence."
+    }
+  }
+]

@@ -1560,7 +1560,7 @@ def update_map_progress(session_identifier, participant_id):
         )
 
         # Wake the Guide only when the follower's actual drawing changed.
-        from agent.map_task.event_trigger import follower_trajectory_event_key
+        from agent.map_task_as_guide.event_trigger import follower_trajectory_event_key
         previous_key = follower_trajectory_event_key(previous_progress or {})
         event_key = follower_trajectory_event_key(map_progress)
         if event_key and event_key != previous_key:

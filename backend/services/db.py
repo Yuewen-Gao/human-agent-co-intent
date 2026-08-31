@@ -460,6 +460,16 @@ def load_all_research_sessions() -> Dict[str, Dict[str, Any]]:
         return out
 
 
+def load_research_session(session_id: str) -> Dict[str, Any]:
+    """Return one full persisted session payload, including Agent-turn records."""
+    if not is_db_configured() or not session_id:
+        return {}
+    SessionLocal = get_session_factory()
+    with SessionLocal() as db:
+        row = db.scalar(select(ResearchSessionRow).where(ResearchSessionRow.session_id == session_id))
+        return dict(row.payload) if row and row.payload else {}
+
+
 def find_session_ids_by_name(session_name: str) -> List[str]:
     """Return session_id values whose research_sessions.session_name matches (exact)."""
     if not is_db_configured() or not (session_name or '').strip():

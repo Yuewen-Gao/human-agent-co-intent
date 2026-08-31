@@ -359,6 +359,11 @@ def register_handlers(socketio):
                     if 'messages' not in participant:
                         participant['messages'] = []
                     participant['messages'].append(message)
+
+            # Persist the received message before any debounced Guide perception.
+            # The prompt is rebuilt from session state, so this also survives a
+            # restart between receipt and the agent's later reply.
+            session_module.commit_session(session_key, found_session)
             
             
             # Check if sender is human or agent

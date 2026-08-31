@@ -1,0 +1,68 @@
+# What is misaligned? (W)
+
+Code one primary task-relevant proposition on which collaborators hold incompatible understandings. Return multiple W codes only when the evidence shows independently identifiable propositions that each require repair. Do not use W for acceptance evidence.
+
+W1. task_goal
+Definition: Different understandings of the final target state or completion standard for the joint task.
+Use when: The issue is what the team is ultimately trying to accomplish or what result counts as complete.
+Do not use when: The issue is a condition that must hold during the task; use W4.
+
+W2. task_specification
+Definition: Different understandings of the immediate subtask or local result that should be produced next.
+Use when: The issue is what to do now, where to go next, or which part of the artifact should change.
+Do not use when: The intended local result is shared but the method or route differs; use W3.
+
+W3. procedure
+Definition: Different understandings of the method, path, or ordered steps for accomplishing an agreed task specification.
+Use when: The intended local result is shared, but collaborators disagree about how to reach it.
+Do not use when: The target result itself differs; use W2.
+
+W4. constraint
+Definition: Different understandings of a condition, boundary, prohibition, or requirement that must remain satisfied.
+Use when: The issue is what must or must not be true while performing the task or in the result.
+Do not use when: The issue is which acceptable consideration has higher priority; use W5.
+
+W5. decision_priority
+Definition: Different understandings of the criterion that should determine a choice among otherwise viable alternatives.
+Use when: Multiple actions remain possible and the trade-off rule differs.
+Do not use when: One option violates a non-negotiable requirement; use W4.
+
+W6. task_state
+Definition: Different understandings of the current state of the task environment or shared artifact.
+Use when: The issue is what has happened, what an artifact contains, or what objects and relations are present.
+Do not use when: The issue is whether a collaborator can see or retrieve that state; use W8.
+
+W7. operational_capability
+Definition: Different understandings of whether a human, agent, or tool can execute a task-relevant operation.
+Use when: The issue is ability, permission, or functional affordance needed to perform an action.
+Do not use when: The issue is only whether task-relevant information is visible or retrievable; use W8.
+
+W8. information_access
+Definition: Different understandings of whether a collaborator can observe, obtain, or retrieve task-relevant information.
+Use when: The issue is access to a map view, document version, message history, system state, or other source.
+Do not use when: Both parties have the same information but interpret its current content differently; use W6.
+
+W9. role_responsibility
+Definition: Different understandings of which collaborator owns responsibility for a task-relevant action or decision.
+Use when: The issue is who should perform a task, make a decision, or monitor a condition.
+Do not use when: Both agree who is responsible but disagree about order or timing; use W10.
+
+W10. coordination_protocol
+Definition: Different understandings of the interaction sequence governing task handoff, timing, or required communication.
+Use when: The issue is when an action should occur, what must happen first, or how a handoff proceeds.
+Do not use when: The issue is solely who owns the task; use W9.
+
+W11. communication_protocol
+Definition: Different understandings of the convention for encoding, referring to, or interpreting task-relevant information, including reference frames, notation, units, labels, or representational formats.
+Use when: Collaborators negotiate, apply incompatibly, or fail to share a convention for subsequent communication or interpretation.
+Do not use when: The issue is only task state (W6), procedure or route (W3), or handoff/timing (W10).
+
+W12. partner_knowledge
+Definition: Different understandings of what the other collaborator knows, believes, or has understood about the task.
+Use when: A belief about the partner's knowledge is contradicted by their question, explanation, or action.
+Do not use when: The issue is whether the partner can access information at all; use W8.
+
+W13. partner_next_action
+Definition: Different understandings of the other collaborator's immediate intended action, as publicly expressed or evidenced in the interaction.
+Use when: The issue concerns what the partner is about to do next or what their immediately preceding contribution was meant to initiate.
+Do not use when: The issue is the shared task requirement itself; use W2.

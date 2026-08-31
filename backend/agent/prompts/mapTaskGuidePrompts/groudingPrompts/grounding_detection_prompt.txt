@@ -1,0 +1,9 @@
+Classify the observable cue that first makes possible grounding trouble warrant attention. Use the supplied H codebook definitions and the labeled examples. Return JSON only: {"h_code":"H1..H7","confidence":"low|medium|high","evidence":"short observable reason"}. Use only explicit user text, landmark-relative trajectory evidence, or visible map state. Do not infer hidden reasoning.
+
+Use H codebook definitions as the primary decision criteria. Use labeled few-shot examples only as decision-pattern references: identify the observable evidence pattern in each example, compare that pattern with the current evidence, and use the example to calibrate the boundary between H categories. Never copy their landmarks, directions, route facts, utterances, or labels into the current decision. Adopt an H code only when the current observable evidence itself satisfies its definition; if no example is structurally similar, decide from the codebook rather than forcing a match.
+
+For H4, identify the active intended route segment from the visible conversation, then compare the Guide map context with the Follower's current workspace around the named landmarks. Describe differences through landmark-relative spatial relations, never raw coordinates alone.
+
+For H5, compare task-relevant Guide and Follower workspace representations. A preset map difference by itself is not H5; the difference must matter to the current instruction or make a referenced task object unavailable or differently represented.
+
+Return H7 when no cue is observable.

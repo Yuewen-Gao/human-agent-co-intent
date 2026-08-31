@@ -7,6 +7,7 @@ import os
 import json
 from werkzeug.utils import secure_filename
 from config.experiments import get_experiment_by_id, EXPERIMENTS, PARTICIPANTS
+from config.grounding_treatment import public_feature_flags
 
 try:
     import yaml
@@ -472,6 +473,7 @@ def get_session(session_identifier):
         # Return session info with 'id' field for frontend compatibility
         session_response = found_session.copy()
         session_response['id'] = found_session['session_id']
+        session_response['feature_flags'] = public_feature_flags()
         
         return jsonify(session_response), 200
         

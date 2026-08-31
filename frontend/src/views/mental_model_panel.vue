@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 
 const props = defineProps({
   modelValue: {
@@ -40,6 +40,7 @@ const sections = [
     fields: [
       { key: 'roleResponsibility', label: 'W9 · Role responsibility', placeholder: 'Who owns which responsibility?' },
       { key: 'coordinationProtocol', label: 'W10 · Coordination protocol', placeholder: 'How should the team coordinate?' },
+      { key: 'communicationProtocol', label: 'W11 · Communication protocol', placeholder: 'What convention should we use to communicate?' },
     ],
   },
   {
@@ -47,17 +48,31 @@ const sections = [
     title: 'TEAM MEMBER',
     accent: 'member',
     fields: [
-      { key: 'partnerKnowledge', label: 'W11 · Partner knowledge', placeholder: 'What does your partner know?' },
-      { key: 'partnerNextAction', label: 'W12 · Partner next action', placeholder: 'What will your partner do next?' },
+      { key: 'partnerKnowledge', label: 'W12 · Partner knowledge', placeholder: 'What does your partner know?' },
+      { key: 'partnerNextAction', label: 'W13 · Partner next action', placeholder: 'What will your partner do next?' },
     ],
   },
 ]
 
 const createModel = (value = {}) =>
   sections.flatMap((section) => section.fields).reduce((model, field) => {
-    model[field.key] = value[field.key] ?? ''
+    const raw = value[field.key]
+    model[field.key] = raw && typeof raw === 'object' ? (raw.value ?? '') : (raw ?? '')
     return model
   }, {})
+
+const fieldMeta = computed(() => {
+  const result = {}
+  for (const section of sections) {
+    for (const field of section.fields) {
+      const raw = props.modelValue?.[field.key]
+      result[field.key] = raw && typeof raw === 'object'
+        ? { status: raw.status || 'inferred', confidence: raw.confidence || 'low' }
+        : { status: 'inferred', confidence: 'low' }
+    }
+  }
+  return result
+})
 
 const model = reactive(createModel(props.modelValue))
 const openSections = ref([])
@@ -109,7 +124,10 @@ const emitModel = (key) => {
 
         <div v-if="isOpen(section.id)" :id="`${section.id}-fields`" class="section-fields">
           <label v-for="field in section.fields" :key="field.key" class="model-field">
-            <span>{{ field.label }}</span>
+            <span class="field-label">
+              {{ field.label }}
+              <small>{{ fieldMeta[field.key].status }} · {{ fieldMeta[field.key].confidence }}</small>
+            </span>
             <textarea
               v-model="model[field.key]"
               :placeholder="field.placeholder"

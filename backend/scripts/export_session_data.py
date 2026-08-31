@@ -224,6 +224,7 @@ def _format_post_timeline_for_participant(
             ann = {}
         timeline.append(
             {
+                'action_id': action_id or '',
                 'action_timestamp': a.get('timestamp') or '',
                 'action_type': a.get('action_type') or '',
                 'action_content': a.get('action_content') or '',
@@ -237,6 +238,70 @@ def _format_post_timeline_for_participant(
             }
         )
     return timeline
+
+
+def format_agent_annotation_timeline(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Format persisted Agent turns in the same annotation shape as human rows."""
+    timeline: List[Dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        annotation = record.get('annotation')
+        annotation = annotation if isinstance(annotation, dict) else {}
+        timeline.append(
+            {
+                'action_id': record.get('action_id') or '',
+                'action_timestamp': record.get('action_timestamp') or '',
+                'action_type': record.get('action_type') or '',
+                'action_content': record.get('action_content') or '',
+                'message_id': record.get('message_id') or '',
+                'recording_status': record.get('recording_status') or 'complete',
+                'recording_errors': record.get('recording_errors') or [],
+                'annotation': {
+                    'explanation_transcription': annotation.get('explanation_transcription') or '',
+                    'task_model_q1': annotation.get('task_model_q1') or '',
+                    'partner_model_q2': annotation.get('partner_model_q2') or '',
+                    'self_model_q3': annotation.get('self_model_q3') or '',
+                    'alignment_q4': annotation.get('alignment_q4') or '',
+                },
+                'current_smm': record.get('current_smm') or {},
+            }
+        )
+    return timeline
+
+
+def build_agent_annotation_timeline(
+    action_entries: List[Dict[str, Any]], session_payload: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Join action facts with SMM/annotation records stored in research_sessions."""
+    records = session_payload.get('agent_turn_records') if isinstance(session_payload, dict) else []
+    by_action_id = {
+        record.get('action_id'): record for record in records
+        if isinstance(record, dict) and isinstance(record.get('action_id'), str)
+    } if isinstance(records, list) else {}
+    merged: List[Dict[str, Any]] = []
+    for action in action_entries:
+        if not isinstance(action, dict) or action.get('is_human') is not False:
+            continue
+        record = dict(by_action_id.get(action.get('action_id')) or {})
+        if not record:
+            continue
+        record.update({
+            'action_id': action.get('action_id') or '',
+            'action_timestamp': action.get('timestamp') or '',
+            'action_type': action.get('action_type') or '',
+            'action_content': action.get('action_content') or '',
+        })
+        merged.extend(format_agent_annotation_timeline([record]))
+    matched_action_ids = {
+        action.get('action_id') for action in action_entries
+        if isinstance(action, dict) and action.get('is_human') is False
+    }
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict) or record.get('action_id') in matched_action_ids:
+            continue
+        merged.extend(format_agent_annotation_timeline([record]))
+    return merged
 
 
 def main() -> int:
@@ -262,6 +327,7 @@ def main() -> int:
         list_distinct_participant_ids,
         load_all_in_session_rows_for_session,
         load_all_post_session_rows_for_session,
+        load_research_session,
         load_session_logs,
     )
 
@@ -295,9 +361,11 @@ def main() -> int:
         name_for_json = name
 
     all_entries = load_session_logs(session_id)
+    session_payload = load_research_session(session_id)
     if not name_for_json and all_entries:
         name_for_json = (all_entries[0].get('session_name') or '')[:512]
     human_actions = [e for e in all_entries if e.get('is_human') is True]
+    agent_annotation_timeline = build_agent_annotation_timeline(all_entries, session_payload)
 
     os.makedirs(args.output_dir, exist_ok=True)
     prefix = _safe_filename_part(label) + '_' + session_id[:8]
@@ -357,6 +425,7 @@ def main() -> int:
         'participant_names': participant_names,
         'participant_name_by_id': participant_name_by_id,
         'human_actions_all': human_actions,
+        'agent_annotation_timeline': agent_annotation_timeline,
         'in_session_annotations_all': _format_in_session_by_participant(
             in_session_all, participant_name_by_id
         ),

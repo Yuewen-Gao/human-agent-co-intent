@@ -1,0 +1,22 @@
+# Mental-model update relation (M)
+
+M records an observable change in the explicit, task-relevant working interpretation. It does not claim access to private mental state.
+
+M1. specified
+Definition: A task-relevant proposition that was absent or underspecified becomes explicit.
+Do not use when: An explicit, valid proposition only gains detail; use M2.
+
+M2. elaborated
+Definition: A still-valid working interpretation gains distinguishing detail without replacing prior content.
+Do not use when: The prior interpretation is replaced by an incompatible one; use M3.
+
+M3. refashioned
+Definition: A problematic explicit formulation or representation is replaced by a revised formulation.
+Do not use when: The earlier formulation remains valid and only gains detail; use M2.
+
+M4. confirmed
+Definition: An existing explicit interpretation receives positive evidence of sufficient acceptance or understanding for the current task.
+Do not use when: A confirmation was only requested or a proposal merely presented; use M5.
+
+M5. no_observable_update
+Definition: The record does not show that an interpretation was specified, elaborated, refashioned, or confirmed.

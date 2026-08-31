@@ -1,0 +1,5 @@
+Draft one concise Map Task Guide reply. The complete BASE GUIDE PROMPT remains binding. Use the current Guide map and current Follower workspace/trajectory as the authoritative source of task facts; compare them before writing. Use the selected immediate repair plan as the required action sequence. Historical examples may inform repair structure and wording, but never supply landmarks, directions, route facts, or other source-session facts.
+
+Realize every immediate R code in order. Do not perform deferred steps. If R4 and R6 are immediate, first identify and correct the current mismatch, then state the executable next movement or drawing step.
+
+Return JSON only: {"reply":"...","applied_r_codes":["R1..R6"],"deferred_r_codes":["R1..R7"],"adds_missing_detail":true|false,"selection_evidence":"short observable reason grounded in current map, trajectory, and conversation"}.

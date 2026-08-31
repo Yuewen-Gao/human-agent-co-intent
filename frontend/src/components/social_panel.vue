@@ -61,6 +61,10 @@ const props = defineProps({
     typeIndicatorEnabled: {
         type: Boolean,
         default: false
+    },
+    showMentalModel: {
+        type: Boolean,
+        default: false
     }
 })
 
@@ -187,7 +191,11 @@ const setMentalModel = (candidate) => {
     if (candidate.fields && typeof candidate.fields === 'object') {
         for (const [key, rawValue] of Object.entries(candidate.fields)) {
             const value = rawValue && typeof rawValue === 'object' ? rawValue.value : rawValue
-            if (typeof value === 'string') fields[key] = value
+            if (typeof value === 'string') {
+                fields[key] = rawValue && typeof rawValue === 'object'
+                    ? { ...rawValue, value }
+                    : { value, status: 'inferred', confidence: 'low' }
+            }
         }
     }
     mentalModel.value = {
@@ -210,16 +218,48 @@ const loadMentalModel = async () => {
 
 const handleMentalModelUpdated = (payload) => {
     if (payload?.session_id !== sessionId.value) return
+    const pendingFields = { ...pendingMentalModelFields }
+    if (mentalModelEditTimer) clearTimeout(mentalModelEditTimer)
+    mentalModelEditTimer = null
+    Object.keys(pendingMentalModelFields).forEach((key) => delete pendingMentalModelFields[key])
     setMentalModel(payload.mental_model)
+    // Re-submit the user's unflushed edit against the authoritative revision
+    // rather than allowing an incoming update to turn it into a stale write.
+    if (sessionId.value && myParticipantId.value && Object.keys(pendingFields).length) {
+        emitMentalModelUpdate(
+            sessionId.value,
+            myParticipantId.value,
+            mentalModel.value.revision,
+            pendingFields,
+        )
+    }
+}
+
+let mentalModelEditTimer = null
+const pendingMentalModelFields = {}
+
+const flushMentalModelEdits = () => {
+    mentalModelEditTimer = null
+    if (!sessionId.value || !myParticipantId.value) return
+    const fields = { ...pendingMentalModelFields }
+    Object.keys(pendingMentalModelFields).forEach((key) => delete pendingMentalModelFields[key])
+    if (Object.keys(fields).length) {
+        emitMentalModelUpdate(sessionId.value, myParticipantId.value, mentalModel.value.revision, fields)
+    }
 }
 
 const handleMentalModelFieldEdit = ({ key, value }) => {
     if (!sessionId.value || !myParticipantId.value || typeof key !== 'string') return
     mentalModel.value = {
         revision: mentalModel.value.revision,
-        fields: { ...mentalModel.value.fields, [key]: value },
+        fields: {
+            ...mentalModel.value.fields,
+            [key]: { ...(mentalModel.value.fields[key] || {}), value },
+        },
     }
-    emitMentalModelUpdate(sessionId.value, myParticipantId.value, mentalModel.value.revision, { [key]: value })
+    pendingMentalModelFields[key] = value
+    if (mentalModelEditTimer) clearTimeout(mentalModelEditTimer)
+    mentalModelEditTimer = setTimeout(flushMentalModelEdits, 400)
 }
 
 const otherParticipants = computed(() => {
@@ -1087,6 +1127,7 @@ onUnmounted(() => {
         delete remoteTypingTimers[k]
     })
     if (localTypingStopTimer) clearTimeout(localTypingStopTimer)
+    if (mentalModelEditTimer) clearTimeout(mentalModelEditTimer)
 })
 </script>
 
@@ -1115,6 +1156,7 @@ onUnmounted(() => {
         </div>
       </Panel>
       <MentalModelPanel
+        v-if="showMentalModel"
         class="mental-model-sidebar"
         :model-value="mentalModel.fields"
         @field-edit="handleMentalModelFieldEdit"

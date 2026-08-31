@@ -1,0 +1,9 @@
+# Map Task Grounding Pipeline
+
+`grounding_analysis/` is an offline-only project. It produces candidate examples, but the running backend never imports or executes it.
+
+The online backend reads three static snapshots under `agent/prompts/mapTaskGuidePrompts/groudingPrompts/`: `h_fewshots.json` supplies reviewed H examples, `repair_fewshots.json` supplies reviewed single-R repair references, and `repair_retrieval_associations.json` supplies H+W→R, H→R, and W→R support counts exported offline from the original annotations. For each `grounding_unit_no`, that export unions all H, W, and R labels on Guide actions before counting co-occurrence. Runtime loaders strip audit metadata, timestamps, future turns, Guide-authored focal responses, uptake/outcome records, and quality metadata before prompt injection. Only observable conversation/map context, a labeled mechanism, repair structure, and a historical reply excerpt cross the runtime boundary.
+
+The orchestrator diagnoses `H` and multi-label `W` in parallel. When repair is needed, it uses the offline support counts only to rank which reviewed repair examples to retrieve; no counts, probabilities, or prescribed R choice enter an LLM prompt. A third LLM call selects an ordered immediate repair plan and any deferred steps from the detected H/W, retrieved structures, and the complete rendered Guide prompt. A fourth LLM call drafts the reply from that selected plan and the same complete prompt. The current Guide grid and Follower workspace/trajectory are the authoritative task facts; retrieved examples are never a source of current landmarks or directions.
+
+The pipeline records only inspectable evidence and structured labels. It does not request hidden reasoning. R7 is deferred until its specified future observable trigger occurs; it is not drafted in the same reply as a new correction. If H is `H7`, W is empty, a plan is invalid, or a draft is invalid, it returns no repair rather than guessing.

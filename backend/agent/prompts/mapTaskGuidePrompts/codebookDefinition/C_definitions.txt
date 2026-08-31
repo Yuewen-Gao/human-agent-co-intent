@@ -1,0 +1,25 @@
+# Interpreted cause (C)
+
+C1. contextual_information_not_communicated_or_retained
+Definition: Relevant context, prior decisions, constraints, or conditions was not communicated, retained, or available when needed.
+
+C2. unevenly_distributed_information
+Definition: Collaborators possess different task-relevant information, representations, or access to information.
+
+C3. information_salience_not_communicated_or_understood
+Definition: Information is available but its importance for the current decision, task outcome, or constraint is not communicated or understood.
+
+C4. unequal_speed_of_information_access
+Definition: Collaborators obtain or inspect relevant information at different times or rates, plausibly contributing to the mismatch.
+
+C5. silence_interpretation_ambiguity
+Definition: Silence has multiple plausible meanings, leaving understanding, action, availability, or confusion indeterminate.
+
+C6. problematic_reference
+Definition: A referring expression does not identify one shared referent, object, place, version, or meaning in the current interaction.
+
+C7. problematic_sequential_implicativeness
+Definition: Collaborators interpret the interactional action of a contribution differently, such as instruction, revision, proposal, confirmation, or incidental remark.
+
+C8. insufficient_evidence_to_infer_cause
+Definition: The record shows a mismatch cue but lacks evidence to distinguish among other causes.

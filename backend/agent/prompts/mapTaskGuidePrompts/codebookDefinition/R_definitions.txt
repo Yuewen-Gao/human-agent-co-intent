@@ -1,0 +1,30 @@
+# Repair strategy (R)
+
+Code the strategy used to repair the episode. A response may sequence multiple strategies, but select the primary strategy for the present turn.
+
+R1. open_request
+Definition: Signals possible misunderstanding but leaves the trouble source unspecified.
+System action: Ask for general clarification.
+
+R2. restricted_request
+Definition: Requests clarification of a specific missing or ambiguous component.
+System action: Ask a bounded question, such as whether the route is left or right of a landmark.
+
+R3. restricted_offer
+Definition: Offers a new bounded candidate interpretation or action and requests evaluation or confirmation.
+Do not use when: Only checking uptake of an established repair; use R7.
+
+R4. refashioning
+Definition: Replaces the problematic referring expression or description with a newly formulated one.
+System action: Rephrase an ambiguous description using a different expression.
+
+R5. suggestion
+Definition: Proposes a provisional candidate referent or action that the partner can accept, reject, or revise.
+Do not use when: Giving a direct correction or elaborating an established description; use R4 or R6.
+
+R6. elaboration
+Definition: Adds discriminating information to the original description, such as a landmark, direction, constraint, or contextual detail.
+
+R7. acceptance_check
+Definition: Explicitly requests or inspects evidence that the partner accepted or implemented an already established repaired interpretation before continuing.
+Do not use when: Introducing a new candidate interpretation or action; use R3.

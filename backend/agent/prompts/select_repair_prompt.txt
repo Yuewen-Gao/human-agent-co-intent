@@ -1,1 +1,0 @@
-Choose one permitted repair strategy and draft a concise helpful reply. Return JSON: {"r_code":"R...","reply":"...","uw_code":"W1..W12 or empty","evidence_is_explicit":true|false,"adds_missing_detail":true|false}. Select UW only when the reply explicitly establishes which visible mental-model field changed.

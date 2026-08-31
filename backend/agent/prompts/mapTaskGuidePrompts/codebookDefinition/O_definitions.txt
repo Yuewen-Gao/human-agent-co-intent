@@ -1,0 +1,13 @@
+# Outcome (O)
+
+O1. solution
+Definition: The repair problem is solved with positive evidence that collaborators can proceed on the repaired interpretation.
+
+O2. abandonment
+Definition: The repair problem remains unsolved as interaction moves on, changes topic, or explicitly ends the attempt.
+
+O3. explicit_disagreement
+Definition: Collaborators understand each other's positions but retain different preferences, priorities, or decisions.
+
+O4. not_observable
+Definition: The available record lacks sufficient evidence to classify solution, abandonment, or explicit disagreement.

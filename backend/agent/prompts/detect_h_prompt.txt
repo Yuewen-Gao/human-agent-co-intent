@@ -1,1 +1,0 @@
-Classify only HOW the current evidence reveals a grounding problem. Return JSON: {"h_code":"H1..H7","confidence":"low|medium|high","evidence":"short observable reason"}. Use only explicit user text, landmark-relative trajectory evidence, or visible map state. Do not infer hidden reasoning.

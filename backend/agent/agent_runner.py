@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
 from functions import parse_iso_timestamp_utc
+from config.grounding_treatment import grounding_treatment_enabled
 import routes.session as session_module
 from routes.participant import (
     find_session_by_identifier, 
@@ -22,18 +23,23 @@ from routes.participant import (
 )
 from agent.agent_context_protocol import AgentContextProtocol
 from agent.llm_client import create_llm_client, LLMClient
-from agent.map_task.agent_session_context import (
+from agent.map_task_as_guide.agent_session_context import (
     append_maptask_grid_context,
     append_session_conversation_memory,
+    follower_trajectory_grid_text,
 )
-from agent.map_task.grounding_policy import append_grounding_policy_if_enabled
-from agent.map_task.mental_model_update import (
-    append_mental_model_update_prompt,
-    parse_mental_model_patch,
+from agent.map_task_as_guide.grounding_as_guide.mental_model_update import (
+    append_mental_model_reply_context,
 )
-from agent.map_task.grounding.orchestrator import GroundingOrchestrator
-from agent.map_task.grounding.grounding_rules import may_update_field
-from services.mental_model_service import apply_agent_mental_model_patch
+from agent.map_task_as_guide.grounding_as_guide.orchestrator import GroundingOrchestrator, safe_decide
+from services.mental_model_service import (
+    append_agent_turn_record,
+    apply_internal_agent_mental_model_patch,
+    ensure_complete_mental_model,
+    public_mental_model,
+    should_publish_mental_model_update,
+)
+from agent.map_task_as_guide.grounding_as_guide.smm_recorder import assess as assess_smm
 
 
 class AgentRunner:
@@ -233,18 +239,20 @@ class AgentRunner:
             # c2 Map Task Guide: use the two-stage grounding pipeline only when
             # the existing Awareness Dashboard exposes follower map progress.
             if self._uses_awareness_grounding_pipeline(participant, session):
-                decision = GroundingOrchestrator(self.llm_client).decide(prompt)
-                self._record_grounding_decision(session, session_key, decision)
-                self._apply_grounding_mental_model_update(session, session_key, decision)
-                reply = str(decision.get('reply') or '').strip()
-                if not reply:
-                    return
-                results = self.protocol.execute_actions([{
-                    'type': 'send_map_guidance',
-                    'content': reply,
-                }])
-                print(f"[AgentRunner] grounding pipeline sent {len(results.get('successful', []))} guidance action(s)")
-                return
+                decision = safe_decide(GroundingOrchestrator(self.llm_client), prompt)
+                if decision is None:
+                    print('[AgentRunner] Grounding pipeline unavailable; using normal Guide reply path')
+                else:
+                    self._record_grounding_decision(session, session_key, decision)
+                    reply = str(decision.get('reply') or '').strip()
+                    if reply:
+                        results = self.protocol.execute_actions([{
+                            'type': 'send_map_guidance',
+                            'content': reply,
+                        }])
+                        self._record_guide_turn(session, session_key, prompt, results)
+                        print(f"[AgentRunner] grounding pipeline sent {len(results.get('successful', []))} guidance action(s)")
+                        return
             
             # Debug: Print prompt
             participant_name = participant.get("name") or participant.get("participant_name")
@@ -268,38 +276,11 @@ class AgentRunner:
             
             # Debug: Print LLM response
             participant_name = participant.get("name") or participant.get("participant_name")
-            print(f'\n{"="*80}')
-            print(f'[AgentRunner] DEBUG - LLM RESPONSE')
-            print(f'{"="*80}')
-            print(f'Participant: {participant_name} ({self.participant_id})')
-            print(f'Response Length: {len(response)} characters')
-            print(f'\n--- Full LLM Response ---')
-            print(response)
-            print(f'--- End LLM Response ---')
-            print(f'{"="*80}\n')
             
             # Parse response
             actions = self._parse_response(response)
-            if self.experiment_type == 'maptask':
-                self._apply_mental_model_patch(response, session, session_key)
-            
-            # Debug: Print parsed actions
-            if actions:
-                print(f'\n{"="*80}')
-                print(f'[AgentRunner] DEBUG - PARSED ACTIONS')
-                print(f'{"="*80}')
-                print(f'Participant: {participant_name} ({self.participant_id})')
-                print(f'Total Actions: {len(actions)}')
-                print(f'\n--- Actions List ---')
-                for i, action in enumerate(actions):
-                    print(f'\nAction {i+1}:')
-                    print(json.dumps(action, indent=2, ensure_ascii=False))
-                print(f'\n--- End Actions List ---')
-                print(f'{"="*80}\n')
-            else:
-                print(f'\n{"="*80}')
-                print(f'[AgentRunner] DEBUG - No actions parsed from response')
-                print(f'{"="*80}\n')
+            # Map Task SMM updates are produced by the independent post-reply
+            # recorder, never by the reply agent's JSON payload.
             
             if not actions:
                 print(f'[AgentRunner] No actions generated for participant {self.participant_id}')
@@ -307,6 +288,8 @@ class AgentRunner:
             
             # Execute actions
             results = self.protocol.execute_actions(actions)
+            if self.experiment_type == 'maptask' and str(participant.get('role') or '').lower() == 'guide':
+                self._record_guide_turn(session, session_key, prompt, results)
             
             # After actions are executed, re-fetch participant to get updated state (including read_essays)
             # This ensures the next perception cycle has the latest data
@@ -360,23 +343,60 @@ class AgentRunner:
             self._message_trigger_timer.daemon = True
             self._message_trigger_timer.start()
 
-    def _apply_mental_model_patch(self, response: str, session: Dict[str, Any], session_key: str) -> None:
-        try:
-            payload = json.loads(response)
-        except (TypeError, json.JSONDecodeError):
-            return
-        result = apply_agent_mental_model_patch(session, parse_mental_model_patch(payload))
-        if not result.get('changed'):
-            return
-        session_module.commit_session(session_key, session)
-        from websocket.handlers import get_socketio
-        get_socketio().emit(
-            'mental_model_updated',
-            {'session_id': session.get('session_id') or session_key, 'mental_model': result['mental_model']},
-            room=session.get('session_id') or session_key,
-        )
+    def _record_guide_turn(self, session: Dict[str, Any], session_key: str, prompt: str, results: Dict[str, Any]) -> None:
+        """Persist one SMM/annotation snapshot for every sent Guide message."""
+        guidance_actions = [
+            item for item in (results.get('successful') or [])
+            if isinstance(item, dict) and (item.get('action') or {}).get('type') == 'send_map_guidance'
+        ]
+        neutral_evidence = prompt.split('<EXPLICIT_WORKING_INTERPRETATION>', 1)[0]
+        for action in guidance_actions:
+            source_action = action.get('action') or {}
+            reply = str(source_action.get('content') or '').strip()
+            action_id = action.get('action_id')
+            recording_errors = list(action.get('recording_errors') or [])
+            if not isinstance(action_id, str) or not action_id:
+                if 'action_log_missing' not in recording_errors:
+                    recording_errors.append('action_log_missing')
+            model = ensure_complete_mental_model(session)
+            try:
+                assessment = assess_smm(self.llm_client, neutral_evidence, model, reply) if self.llm_client else {
+                    'base_revision': model.get('revision', 0), 'changes': {},
+                    'annotation': {key: 'not_observable' for key in ('explanation_transcription', 'task_model_q1', 'partner_model_q2', 'self_model_q3', 'alignment_q4')},
+                    'valid': True,
+                }
+                if not assessment.get('valid', True):
+                    recording_errors.append('smm_recorder_invalid_output')
+            except Exception as error:
+                print(f'[AgentRunner] SMM recorder failed: {error}')
+                recording_errors.append('smm_recorder_failed')
+                assessment = {'base_revision': model.get('revision', 0), 'changes': {}, 'annotation': {}}
+            update_result = apply_internal_agent_mental_model_patch(session, assessment)
+            record = append_agent_turn_record(
+                session, action_id=action_id, message_id=action.get('message_id'),
+                annotation=assessment.get('annotation'),
+                agent_participant_id=self.participant_id,
+                trajectory_grid_at_reply=follower_trajectory_grid_text(session),
+                recording_errors=recording_errors,
+            )
+            record.update({
+                'action_timestamp': datetime.now(timezone.utc).isoformat(),
+                'action_type': source_action.get('type') or 'send_map_guidance',
+                'action_content': reply,
+            })
+            session_module.commit_session(session_key, session)
+            if should_publish_mental_model_update(bool(update_result.get('changed'))):
+                from websocket.handlers import get_socketio
+                room = session.get('session_id') or session_key
+                get_socketio().emit(
+                    'mental_model_updated',
+                    {'session_id': room, 'mental_model': public_mental_model(session)},
+                    room=room,
+                )
 
     def _uses_awareness_grounding_pipeline(self, participant: Dict[str, Any], session: Dict[str, Any]) -> bool:
+        if not grounding_treatment_enabled():
+            return False
         if (self.experiment_type or '').lower() != 'maptask':
             return False
         if str(participant.get('role') or '').strip().lower() != 'guide':
@@ -392,21 +412,6 @@ class AgentRunner:
         audit.append({'timestamp': datetime.now(timezone.utc).isoformat(), **decision})
         session_module.commit_session(session_key, session)
 
-    def _apply_grounding_mental_model_update(self, session: Dict[str, Any], session_key: str, decision: Dict[str, Any]) -> None:
-        uw_code = may_update_field(evidence_is_explicit=bool((decision.get('h') or {}).get('evidence')), proposed_field=decision.get('uw'))
-        reply = str(decision.get('reply') or '').strip()
-        field_keys = {'W1':'taskGoal','W2':'taskSpecification','W3':'procedure','W4':'constraint','W5':'decisionPriority','W6':'taskState','W7':'operationalCapability','W8':'informationAccess','W9':'roleResponsibility','W10':'coordinationProtocol','W11':'partnerKnowledge','W12':'partnerNextAction'}
-        key = field_keys.get(uw_code)
-        if not key or not reply:
-            return
-        model = session.get('mental_model') or {}
-        patch = {'base_revision': model.get('revision', 0), 'changes': {key: {'value': reply, 'confidence': 'medium'}}}
-        result = apply_agent_mental_model_patch(session, patch)
-        if result.get('changed'):
-            session_module.commit_session(session_key, session)
-            from websocket.handlers import get_socketio
-            get_socketio().emit('mental_model_updated', {'session_id': session.get('session_id') or session_key, 'mental_model': result['mental_model']}, room=session.get('session_id') or session_key)
-    
     def _trigger_vote(self, vote_type: str, participant: Dict[str, Any], session: Dict[str, Any], session_key: str) -> bool:
         """
         Directly trigger voting for HiddenProfile agent.
@@ -644,6 +649,10 @@ Response:"""
                     if path and path.startswith('Participant.'):
                         # Extract field name from path (e.g., 'Participant.money' -> 'money')
                         field_name = path.split('.', 1)[1]
+                        # Map Task drawing payloads can contain a large PNG data URL.
+                        # The normalized text-only workspace is appended separately.
+                        if self.experiment_type == 'maptask' and field_name == 'map_progress':
+                            continue
                         private_state[field_name] = value
         
         # Also include top-level participant fields that might not be in interface
@@ -654,6 +663,8 @@ Response:"""
         # Include experiment_params directly (as fallback for fields not in interface)
         exp_params = participant.get('experiment_params', {})
         for key, value in exp_params.items():
+            if self.experiment_type == 'maptask' and key == 'map_progress':
+                continue
             if key not in private_state:
                 private_state[key] = value
         
@@ -852,6 +863,12 @@ Response:"""
                     continue
                 
                 field_name = path.split('.', 1)[1]
+                # Do not serialize the raw Follower drawing payload into
+                # CURRENT GAME STATE.  It may include ``canvasDataUrl``; the
+                # Map Task prompt gets its normalized text-only replacement
+                # from append_maptask_grid_context instead.
+                if self.experiment_type == 'maptask' and field_name == 'map_progress':
+                    continue
                 
                 # Try to get from participant interface first
                 interface = p.get('interface', {})
@@ -1054,9 +1071,10 @@ Response:"""
             prompt, self.participant_id, session
         )
         if self.experiment_type == 'maptask':
-            prompt = append_maptask_grid_context(prompt, participant, session)
-            prompt = append_grounding_policy_if_enabled(prompt, participant)
-            prompt = append_mental_model_update_prompt(prompt, session.get('mental_model'))
+            prompt = append_maptask_grid_context(
+                prompt, participant, session, agent_participant_id=self.participant_id
+            )
+            prompt = append_mental_model_reply_context(prompt, session.get('mental_model'))
         
         return prompt
     
@@ -1525,28 +1543,7 @@ Response:"""
             print(f'[AgentRunner] Mock LLM called (no LLM client)')
             return self._mock_llm_response()
         
-        user_content: Any = prompt
-        if (
-            participant is not None
-            and self.llm_client.supports_multimodal_images()
-            and (self.experiment_type or "").lower() == "maptask"
-        ):
-            from agent.map_image_for_llm import map_data_urls_for_openai_vision
-            map_inputs = map_data_urls_for_openai_vision(session or {}, self.experiment_type)
-            if map_inputs:
-                user_content = [{"type": "text", "text": prompt}]
-                for map_input in map_inputs:
-                    role = map_input["role"].upper()
-                    user_content.extend([
-                        {"type": "text", "text": f"<{role} MAP IMAGE>"},
-                        {"type": "image_url", "image_url": {"url": map_input["data_url"]}},
-                    ])
-                print(
-                    '[AgentRunner] maptask: attached vision map images for '
-                    + ', '.join(item["role"] for item in map_inputs)
-                )
-            else:
-                print('[AgentRunner] maptask: no vision map images attached (missing files or non-raster maps)')
+        user_content = prompt
 
         try:
             # Use unified LLM client interface

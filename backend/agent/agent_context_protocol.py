@@ -19,6 +19,7 @@ from websocket.handlers import broadcast_participant_update, get_socketio
 from services import agent_tts
 from services.action_logger import utc_now_iso_z
 from functions import start_production
+from agent.action_records import attach_logged_action_id
 
 
 # Global registry for action handlers by experiment type
@@ -113,9 +114,16 @@ class AgentContextProtocol:
             try:
                 result = self._execute_single_action(action, participant, session, session_key)
                 if result.get('success'):
-                    results['successful'].append(result)
-                    # Log agent action
-                    self._log_agent_action(action, action_type, result, participant, session, session_key)
+                    # The participant-visible action is already complete.  Keep it
+                    # successful even if the independent audit-log write fails.
+                    try:
+                        action_id = self._log_agent_action(
+                            action, action_type, result, participant, session, session_key
+                        )
+                    except Exception:
+                        action_id = None
+                        results['errors'].append('action_log_missing')
+                    results['successful'].append(attach_logged_action_id(result, action_id))
                 else:
                     results['failed'].append(result)
             except Exception as e:
@@ -297,12 +305,12 @@ class AgentContextProtocol:
         participant: Dict[str, Any],
         session: Dict[str, Any],
         session_key: str,
-    ):
+    ) -> Optional[str]:
         """Log agent action with session_status (public + private)."""
         action_content = self._format_action_content(action, action_type, result)
         actual_session_id = session.get('session_id') or session_key
         from services.action_logger import log_action
-        log_action(
+        return log_action(
             session_id=actual_session_id,
             participant_id=self.participant_id,
             is_human=False,

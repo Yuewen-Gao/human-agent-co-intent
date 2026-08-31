@@ -1,0 +1,34 @@
+# How is possible misalignment detected? (H)
+
+Code one primary observable cue that first makes possible misalignment warrant attention. A cue is evidence of possible non-grounding, not proof of private mental state.
+
+H1. other_initiated_repair
+Definition: The recipient explicitly signals a problem with the prior contribution and requests clarification, specification, repetition, or confirmation.
+Use when: A participant or agent produces an open request, restricted request, or restricted offer in response to the preceding contribution.
+
+H2. insufficient_acceptance_evidence
+Definition: A contribution needing confirmation receives no sufficient positive evidence of understanding after a reasonable opportunity to respond.
+Use when: No acknowledgement, relevant next contribution, restatement, or task action demonstrates understanding.
+Do not use when: Ordinary silence, interface delay, or no response opportunity.
+
+H3. incompatible_public_response
+Definition: A public reply, restatement, or action demonstrates an interpretation incompatible with an earlier shared instruction, task state, or commitment.
+Use when: The incompatibility is observable in dialogue or a shared representation.
+Do not use when: It is only an analyst guess about intention.
+
+H4. action_plan_deviation
+Definition: An observed task action departs from an agreed or externally represented plan, procedure, route, or constraint.
+Use when: There is a traceable reference plan and a subsequent action that does not fit it.
+Do not use when: An action is merely unsuccessful and no plan was established.
+
+H5. workspace_representation_conflict
+Definition: Public workspace representations differ on a task-relevant artifact, location, version, visibility, or state.
+Use when: The conflict can be tied to the shared map, document, canvas, or system view.
+
+H6. self_reported_uncertainty
+Definition: A participant or agent explicitly states uncertainty about their own understanding, interpretation, or ability to proceed.
+Use when: The uncertainty is directly expressed.
+Do not use when: Treating uncertainty alone as proof that two parties are misaligned.
+
+H7. not_observed
+Definition: No observable detection cue is present in the episode record.
