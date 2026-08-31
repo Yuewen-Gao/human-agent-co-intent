@@ -1398,7 +1398,8 @@ onUnmounted(() => {
     flex: 0 0 auto;
 }
 .mental-model-sidebar {
-    flex: 0 1 auto;
+    flex: 1 1 0;
+    min-height: 0;
 }
 .interaction-box {
     width: 100%;

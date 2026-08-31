@@ -75,7 +75,7 @@ const fieldMeta = computed(() => {
 })
 
 const model = reactive(createModel(props.modelValue))
-const openSections = ref([])
+const openSections = ref(sections.map((section) => section.id))
 
 watch(
   () => props.modelValue,
@@ -143,8 +143,12 @@ const emitModel = (key) => {
 
 <style scoped>
 .mental-model-panel {
-  flex: 0 0 auto;
-  overflow: hidden;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: #ffffff;
   border: 1px solid #dee2e6;
   border-radius: 6px;
@@ -173,7 +177,9 @@ const emitModel = (key) => {
 
 .model-sections {
   display: grid;
+  flex: 0 0 auto;
   gap: 6px;
+  min-height: auto;
   padding: 8px;
 }
 

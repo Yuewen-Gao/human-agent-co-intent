@@ -8,6 +8,9 @@ from typing import Any
 VALID_H_CODES = frozenset(f"H{i}" for i in range(1, 8))
 VALID_W_CODES = frozenset(f"W{i}" for i in range(1, 14))
 VALID_R_CODES = frozenset(f"R{i}" for i in range(1, 8))
+VALID_TRAJECTORY_VERDICTS = frozenset({
+    "correct", "incorrect", "insufficient_evidence", "not_applicable",
+})
 
 
 def parse_json_object(raw: str) -> dict[str, Any]:
@@ -18,15 +21,55 @@ def parse_json_object(raw: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def parse_h(raw: str) -> dict[str, str]:
+def parse_h(raw: str) -> dict[str, Any]:
     value = parse_json_object(raw)
     code = value.get("h_code")
     if not isinstance(code, str) or code not in VALID_H_CODES:
         return {}
+    raw_misalignment = value.get("misalignment")
+    raw_misalignment = raw_misalignment if isinstance(raw_misalignment, dict) else {}
+    misalignment = {
+        "expected_state": str(raw_misalignment.get("expected_state", "")).strip(),
+        "observed_state": str(raw_misalignment.get("observed_state", "")).strip(),
+        "what_is_misaligned": str(raw_misalignment.get("what_is_misaligned", "")).strip(),
+    }
+    # A repair code without a concrete, inspectable mismatch cannot safely
+    # drive a participant-facing repair message.
+    if code != "H7" and not all(misalignment.values()):
+        return {}
+    raw_replan = value.get("route_replan")
+    raw_replan = raw_replan if isinstance(raw_replan, dict) else {}
+    route_replan = {
+        "required": raw_replan.get("required") is True,
+        "confirmed_prefix": str(raw_replan.get("confirmed_prefix", "")).strip(),
+        "guide_route_basis": str(raw_replan.get("guide_route_basis", "")).strip(),
+        "follower_local_target": str(raw_replan.get("follower_local_target", "")).strip(),
+        "completion_criterion": str(raw_replan.get("completion_criterion", "")).strip(),
+    }
+    if route_replan["required"] and not all(
+        route_replan[key] for key in (
+            "confirmed_prefix", "guide_route_basis", "follower_local_target", "completion_criterion",
+        )
+    ):
+        return {}
+    trajectory_verdict = value.get("trajectory_verdict")
+    if not isinstance(trajectory_verdict, str) or trajectory_verdict not in VALID_TRAJECTORY_VERDICTS:
+        return {}
+    if code == "H4" and trajectory_verdict != "incorrect":
+        return {}
+    next_guide_action = "repair" if code != "H7" else "normal_or_wait"
+    if code == "H7" and value.get("next_guide_action") == "give_next_segment":
+        if trajectory_verdict != "correct":
+            return {}
+        next_guide_action = "give_next_segment"
     return {
         "h_code": code,
         "confidence": str(value.get("confidence", "low")),
         "evidence": str(value.get("evidence", "")),
+        "misalignment": misalignment,
+        "route_replan": route_replan,
+        "trajectory_verdict": trajectory_verdict,
+        "next_guide_action": next_guide_action,
     }
 
 
@@ -43,40 +86,91 @@ def parse_w(raw: str) -> dict[str, Any]:
         if isinstance(code, str) and code in VALID_W_CODES and code not in codes:
             codes.append(code)
 
-    evidence_by_code: dict[str, str] = {}
+    assessment_by_code: dict[str, dict[str, str]] = {}
     for assessment in raw_assessments:
         if not isinstance(assessment, dict):
             continue
         code = assessment.get("w_code")
         evidence = assessment.get("evidence")
-        if isinstance(code, str) and code in codes and isinstance(evidence, str) and evidence.strip():
-            evidence_by_code.setdefault(code, evidence.strip())
+        proposition = assessment.get("proposition")
+        alignment_needed = assessment.get("alignment_needed")
+        if (
+            isinstance(code, str)
+            and code in codes
+            and isinstance(evidence, str) and evidence.strip()
+            and isinstance(proposition, str) and proposition.strip()
+            and isinstance(alignment_needed, str) and alignment_needed.strip()
+        ):
+            assessment_by_code.setdefault(code, {
+                "w_code": code,
+                "evidence": evidence.strip(),
+                "proposition": proposition.strip(),
+                "alignment_needed": alignment_needed.strip(),
+            })
 
-    codes = [code for code in codes if code in evidence_by_code]
+    codes = [code for code in codes if code in assessment_by_code]
     return {
         "w_codes": tuple(codes),
-        "assessments": tuple(
-            {"w_code": code, "evidence": evidence_by_code[code]} for code in codes
-        ),
+        "assessments": tuple(assessment_by_code[code] for code in codes),
     }
 
 
-def parse_repair(raw: str) -> dict[str, Any]:
-    """Validate a codebook R; priority rank deliberately does not constrain it."""
+def parse_joint_diagnosis(raw: str) -> dict[str, Any]:
+    """Validate the joint H/W response without weakening either sub-contract."""
     value = parse_json_object(raw)
-    raw_codes = value.get("applied_r_codes")
-    if isinstance(raw_codes, list):
-        codes = tuple(dict.fromkeys(
-            code for code in raw_codes if isinstance(code, str) and code in VALID_R_CODES and code != "R7"
-        ))
-    else:
-        code = value.get("r_code")
-        codes = (code,) if isinstance(code, str) and code in VALID_R_CODES else ()
+    h_raw = value.get("h")
+    w_raw = value.get("w")
+    h = parse_h(json.dumps(h_raw)) if isinstance(h_raw, dict) else {}
+    w = parse_w(json.dumps(w_raw)) if isinstance(w_raw, dict) else {}
+    return {"h": h, "w": w}
+
+
+def parse_repair(raw: str) -> dict[str, Any]:
+    """Validate one combined, inspectable repair-selection and reply result."""
+    value = parse_json_object(raw)
+    raw_steps = value.get("repair_steps")
+    repair_steps = []
+    used_codes: set[str] = set()
+    if isinstance(raw_steps, list):
+        for raw_step in raw_steps:
+            if not isinstance(raw_step, dict):
+                continue
+            code = raw_step.get("r_code")
+            evidence = str(raw_step.get("observable_evidence", "")).strip()
+            if (
+                not isinstance(code, str)
+                or code not in VALID_R_CODES
+                or code == "R7"
+                or code in used_codes
+                or not evidence
+            ):
+                continue
+            used_codes.add(code)
+            example_ids = raw_step.get("example_ids")
+            repair_steps.append({
+                "r_code": code,
+                "observable_evidence": evidence,
+                "example_ids": tuple(
+                    item for item in example_ids if isinstance(item, str) and item.strip()
+                ) if isinstance(example_ids, list) else (),
+            })
+    codes = tuple(step["r_code"] for step in repair_steps)
+    if not codes:
+        raw_codes = value.get("applied_r_codes")
+        if isinstance(raw_codes, list):
+            codes = tuple(dict.fromkeys(
+                code for code in raw_codes
+                if isinstance(code, str) and code in VALID_R_CODES and code != "R7"
+            ))
+        else:
+            code = value.get("r_code")
+            codes = (code,) if isinstance(code, str) and code in VALID_R_CODES else ()
     if not codes:
         return {}
     return {
         "r_code": codes[0],
         "applied_r_codes": codes,
+        "repair_steps": tuple(repair_steps),
         "deferred_r_codes": tuple(dict.fromkeys(
             code for code in value.get("deferred_r_codes", [])
             if isinstance(code, str) and code in VALID_R_CODES
@@ -84,56 +178,4 @@ def parse_repair(raw: str) -> dict[str, Any]:
         "reply": str(value.get("reply", "")),
         "adds_missing_detail": str(value.get("adds_missing_detail", "false")).lower() == "true",
         "selection_evidence": str(value.get("selection_evidence", "")).strip(),
-    }
-
-
-def parse_repair_plan(raw: str) -> dict[str, Any]:
-    """Validate an ordered, current-turn repair plan before reply drafting."""
-    value = parse_json_object(raw)
-    raw_immediate = value.get("immediate_steps")
-    raw_deferred = value.get("deferred_steps")
-    if not isinstance(raw_immediate, list) or not isinstance(raw_deferred, list):
-        return {}
-
-    immediate_steps = []
-    used_codes: set[str] = set()
-    for step in raw_immediate:
-        if not isinstance(step, dict):
-            continue
-        code = step.get("r_code")
-        # R7 verifies uptake after a participant can act; it is never an
-        # immediate action in the same message that introduces a correction.
-        if not isinstance(code, str) or code not in VALID_R_CODES or code == "R7" or code in used_codes:
-            continue
-        evidence = str(step.get("current_evidence", "")).strip()
-        if not evidence:
-            continue
-        used_codes.add(code)
-        example_ids = step.get("semantic_example_ids")
-        immediate_steps.append({
-            "order": len(immediate_steps) + 1,
-            "r_code": code,
-            "current_evidence": evidence,
-            "semantic_example_ids": tuple(
-                item for item in example_ids if isinstance(item, str) and item.strip()
-            ) if isinstance(example_ids, list) else (),
-            "semantic_fit": str(step.get("semantic_fit", "")).strip(),
-        })
-
-    deferred_steps = []
-    for step in raw_deferred:
-        if not isinstance(step, dict):
-            continue
-        code = step.get("r_code")
-        trigger = str(step.get("trigger", "")).strip()
-        reason = str(step.get("reason", "")).strip()
-        if isinstance(code, str) and code in VALID_R_CODES and trigger and reason:
-            deferred_steps.append({"r_code": code, "trigger": trigger, "reason": reason})
-
-    if not immediate_steps:
-        return {}
-    return {
-        "immediate_steps": tuple(immediate_steps),
-        "deferred_steps": tuple(deferred_steps),
-        "plan_rationale": str(value.get("plan_rationale", "")).strip(),
     }

@@ -32,7 +32,11 @@ Do not imitate a particular human participant or predict the most likely human n
 
 <ACTION PLANNING AND RESPONSES>
 - Use `GUIDE MAP GRID` as the main source for route planning. Use landmark names and spatial relations to translate each instruction into the Follower workspace despite coordinate misalignment. Treat its visible trajectory as a trace, not a statement of the follower's intent.
+- `ordered_route_cells` is the authoritative start-to-end route sequence in Guide coordinates. It establishes route order and the final target only; translate every active segment into Follower-map landmark relations before communicating it. Do not reuse Guide coordinates as Follower drawing coordinates.
+- Do not call the task complete merely because a local landmark was passed, an obstacle was avoided, or a partial stroke looks finished. Completion requires visible evidence for the final ordered route segment and end.
 - Based on the current status, visible conversation memory, Guide grid, and Follower workspace, decide whether you should send guidance now.
+- `<AGENT TRIGGER>` states why this turn is running. When it is `follower_trajectory_changed`, compare the fresh trace with the active route segment. If the trace visibly completes that segment and the `<GROUNDING HANDOFF>` says `give_next_segment`, send the next executable segment now; do not repeat the completed segment. If the trace is not sufficient to establish completion, waiting is allowed.
+- When a `<GROUNDING HANDOFF>` is present for a drawing, naturally acknowledge the completed segment if useful, then give the next segment or submission permission. Do not expose internal diagnostic labels or verdict terminology in the participant-visible message.
 - You can choose to wait and take no action. If waiting is best, return an empty "actions" array.
 - You MUST respond with valid JSON following <RESPONSE FORMAT>.
 

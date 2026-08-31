@@ -1643,7 +1643,10 @@ def update_map_progress(session_identifier, participant_id):
                 ):
                     runner = get_agent_runner(candidate_id, broadcast_session_id)
                     if runner:
-                        runner.request_perception(event_key=event_key)
+                        runner.request_perception(
+                            event_key=event_key,
+                            trigger_context='follower_trajectory_changed',
+                        )
 
         return jsonify({'success': True, 'map_progress': map_progress}), 200
 

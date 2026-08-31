@@ -6,6 +6,7 @@ W1. task_goal
 Definition: Different understandings of the final target state or completion standard for the joint task.
 Use when: The issue is what the team is ultimately trying to accomplish or what result counts as complete.
 Do not use when: The issue is a condition that must hold during the task; use W4.
+Map Task completion rule: IF a participant or agent treats passing one landmark, avoiding visible landmarks, or finishing a local-looking stroke as task completion without evidence that the ordered target route has reached its final segment/end, THEN code W1. Repair the completion standard: completion requires the final ordered route target, not merely a locally safe trajectory.
 
 W2. task_specification
 Definition: Different understandings of the immediate subtask or local result that should be produced next.

@@ -5,30 +5,37 @@ Code one primary observable cue that first makes possible misalignment warrant a
 H1. other_initiated_repair
 Definition: The recipient explicitly signals a problem with the prior contribution and requests clarification, specification, repetition, or confirmation.
 Use when: A participant or agent produces an open request, restricted request, or restricted offer in response to the preceding contribution.
+Operational rule: IF a current visible message explicitly asks to clarify, repeat, specify, or confirm a prior task contribution, THEN classify H1 and route to repair. Record the prior instruction or interpretation that the request leaves unresolved.
 
 H2. insufficient_acceptance_evidence
 Definition: A contribution needing confirmation receives no sufficient positive evidence of understanding after a reasonable opportunity to respond.
 Use when: No acknowledgement, relevant next contribution, restatement, or task action demonstrates understanding.
 Do not use when: Ordinary silence, interface delay, or no response opportunity.
+Operational rule: IF a prior Guide contribution gave the Follower a real opportunity to show uptake AND a subsequent relevant visible contribution or action still gives no acknowledgement, relevant restatement, or task action demonstrating uptake, THEN classify H2 and route to repair. Do not classify H2 from silence, interface delay, or lack of a response opportunity.
 
 H3. incompatible_public_response
 Definition: A public reply, restatement, or action demonstrates an interpretation incompatible with an earlier shared instruction, task state, or commitment.
 Use when: The incompatibility is observable in dialogue or a shared representation.
 Do not use when: It is only an analyst guess about intention.
+Operational rule: IF an earlier visible instruction, task state, or commitment conflicts with a later visible reply, drawing, or restatement, THEN classify H3 and route to repair. The conflict must be expressible as an observable expected-versus-observed difference; do not infer it from a guess about private intention. IF that conflict reveals that the Guide and Follower maps represent a route-relevant landmark relation differently, THEN reconstruct the current target segment from the ordered Guide route and express its actionable target in Follower-local landmark relations before repair.
 
 H4. action_plan_deviation
 Definition: An observed task action departs from an agreed or externally represented plan, procedure, route, or constraint.
 Use when: There is a traceable reference plan and a subsequent action that does not fit it.
 Do not use when: An action is merely unsuccessful and no plan was established.
+Operational rule: IF `<AGENT TRIGGER>` says `follower_trajectory_changed` AND the fresh Follower trace departs from the active target route segment, THEN classify H4 and route to repair. Establish the active segment first from the latest visible Guide instruction, then from the Guide map's landmark-relative route where needed; record both the intended segment and the observed departure. IF the fresh trace instead completes that active segment without a departure, THEN classify H7 and hand off to the ordinary Guide to provide the next segment.
 
 H5. workspace_representation_conflict
 Definition: Public workspace representations differ on a task-relevant artifact, location, version, visibility, or state.
 Use when: The conflict can be tied to the shared map, document, canvas, or system view.
+Operational rule: IF the Guide and Follower workspaces show conflicting task-relevant representations of the landmark, route segment, artifact, visibility, or state currently at issue, THEN classify H5 and route to repair. Record the expected and observed map relation. Reconstruct the current target segment from the ordered Guide route, then translate it into Follower-local landmark relations; never continue a pre-difference instruction that uses Guide-coordinate relations. Do not classify H5 for their expected preset coordinate or orientation differences alone.
 
 H6. self_reported_uncertainty
 Definition: A participant or agent explicitly states uncertainty about their own understanding, interpretation, or ability to proceed.
 Use when: The uncertainty is directly expressed.
 Do not use when: Treating uncertainty alone as proof that two parties are misaligned.
+Operational rule: IF a current visible message directly states uncertainty about how to interpret or continue the task, THEN classify H6 and route to repair. Record the unresolved instruction, route relation, or task state named by the participant; do not infer H6 from behavior alone.
 
 H7. not_observed
 Definition: No observable detection cue is present in the episode record.
+Operational rule: IF none of H1-H6's IF conditions is satisfied by current observable evidence, THEN classify H7 and do not route to repair. IF a fresh Follower trajectory visibly completes the active intended segment, THEN hand off to the ordinary Guide to give the next executable segment; OTHERWISE, let the ordinary Guide answer a non-repair question or wait.

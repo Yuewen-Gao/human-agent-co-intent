@@ -32,11 +32,19 @@ from agent.map_task_as_guide.grounding_as_guide.mental_model_update import (
     append_mental_model_reply_context,
 )
 from agent.map_task_as_guide.grounding_as_guide.orchestrator import GroundingOrchestrator, safe_decide
+from agent.map_task_as_guide.grounding_as_guide.trajectory_gate import (
+    advice_signature,
+    should_suppress_trajectory_reply,
+)
 from services.mental_model_service import (
     append_agent_turn_record,
     apply_internal_agent_mental_model_patch,
+    claim_next_smm_recording_job,
     ensure_complete_mental_model,
+    enqueue_smm_recording_job,
+    finish_smm_recording_job,
     public_mental_model,
+    resume_smm_recording_jobs,
     should_publish_mental_model_update,
     write_agent_annotation_timeline_file,
 )
@@ -82,6 +90,8 @@ class AgentRunner:
         self.is_running = False
         self.perception_thread = None
         self._perception_call_lock = threading.Lock()
+        self._smm_worker_lock = threading.Lock()
+        self._smm_worker_thread = None
         self._message_trigger_lock = threading.Lock()
         self._message_trigger_timer = None
         self._handled_event_keys: set[str] = set()
@@ -96,6 +106,8 @@ class AgentRunner:
             return
         
         self.is_running = True
+        if (self.experiment_type or '').lower() == 'maptask':
+            self._resume_smm_recording_worker()
         
         # For hiddenprofile experiment, check if initial vote is needed before starting perception loop
         if self.experiment_type == 'hiddenprofile':
@@ -181,7 +193,7 @@ class AgentRunner:
                 
                 # Perceive and act
                 with self._perception_call_lock:
-                    self._perceive_and_act(session, session_key)
+                    self._perceive_and_act(session, session_key, trigger_context='periodic_check')
                 
                 # Wait for next perception window
                 time.sleep(perception_window)
@@ -193,7 +205,12 @@ class AgentRunner:
                 # Wait a bit before retrying
                 time.sleep(5)
     
-    def _perceive_and_act(self, session: Dict[str, Any], session_key: str):
+    def _perceive_and_act(
+        self,
+        session: Dict[str, Any],
+        session_key: str,
+        trigger_context: str = 'periodic_check',
+    ):
         """Perceive environment and generate/execute actions"""
         try:
             try:
@@ -236,6 +253,17 @@ class AgentRunner:
             
             # Generate prompt
             prompt = self._build_prompt(participant, session, perception)
+            if (
+                self.experiment_type == 'maptask'
+                and str(participant.get('role') or '').lower() == 'guide'
+            ):
+                prompt += (
+                    '\n<AGENT TRIGGER>\n'
+                    + trigger_context
+                    + '\n</AGENT TRIGGER>'
+                )
+            trajectory_triggered = trigger_context == 'follower_trajectory_changed'
+            pending_trajectory_decision: Dict[str, Any] | None = None
 
             # c2 Map Task Guide: use the two-stage grounding pipeline only when
             # the existing Awareness Dashboard exposes follower map progress.
@@ -245,15 +273,31 @@ class AgentRunner:
                     print('[AgentRunner] Grounding pipeline unavailable; using normal Guide reply path')
                 else:
                     self._record_grounding_decision(session, session_key, decision)
+                    if decision.get('suppress_base_reply'):
+                        print('[AgentRunner] trajectory verdict leaves current guidance unchanged')
+                        return
+                    if trajectory_triggered and self._trajectory_reply_is_duplicate(session, decision):
+                        print('[AgentRunner] duplicate trajectory advice suppressed')
+                        return
                     reply = str(decision.get('reply') or '').strip()
                     if reply:
                         results = self.protocol.execute_actions([{
                             'type': 'send_map_guidance',
                             'content': reply,
                         }])
+                        self._remember_trajectory_advice(session, decision, results)
                         self._record_guide_turn(session, session_key, prompt, results)
                         print(f"[AgentRunner] grounding pipeline sent {len(results.get('successful', []))} guidance action(s)")
                         return
+                    if decision.get('normal_guide_action') == 'give_next_segment':
+                        pending_trajectory_decision = decision
+                        prompt += (
+                            '\n<GROUNDING HANDOFF>\n'
+                            'The fresh Follower trajectory completed the active intended segment. '
+                            'Send the next executable route segment now. If acknowledgement is useful, phrase it naturally; '
+                            'do not expose an internal diagnostic verdict label.\n'
+                            '</GROUNDING HANDOFF>'
+                        )
             
             # Debug: Print prompt
             participant_name = participant.get("name") or participant.get("participant_name")
@@ -290,6 +334,8 @@ class AgentRunner:
             # Execute actions
             results = self.protocol.execute_actions(actions)
             if self.experiment_type == 'maptask' and str(participant.get('role') or '').lower() == 'guide':
+                if pending_trajectory_decision:
+                    self._remember_trajectory_advice(session, pending_trajectory_decision, results)
                 self._record_guide_turn(session, session_key, prompt, results)
             
             # After actions are executed, re-fetch participant to get updated state (including read_essays)
@@ -320,6 +366,7 @@ class AgentRunner:
         self,
         debounce_seconds: float = 0.5,
         event_key: Optional[str] = None,
+        trigger_context: str = 'external_event',
     ) -> None:
         """Schedule one debounced perception, once for each event identity."""
         if not self.is_running:
@@ -331,7 +378,7 @@ class AgentRunner:
             with self._perception_call_lock:
                 session_key, session = find_session_by_identifier(self.session_id)
                 if session and session.get('status') == 'running':
-                    self._perceive_and_act(session, session_key)
+                    self._perceive_and_act(session, session_key, trigger_context=trigger_context)
 
         with self._message_trigger_lock:
             if event_key and event_key in self._handled_event_keys:
@@ -345,7 +392,7 @@ class AgentRunner:
             self._message_trigger_timer.start()
 
     def _record_guide_turn(self, session: Dict[str, Any], session_key: str, prompt: str, results: Dict[str, Any]) -> None:
-        """Persist one SMM/annotation snapshot for every sent Guide message."""
+        """Persist SMM jobs immediately; recording itself runs outside the reply lock."""
         guidance_actions = [
             item for item in (results.get('successful') or [])
             if isinstance(item, dict) and (item.get('action') or {}).get('type') == 'send_map_guidance'
@@ -355,46 +402,108 @@ class AgentRunner:
             source_action = action.get('action') or {}
             reply = str(source_action.get('content') or '').strip()
             action_id = action.get('action_id')
-            recording_errors = list(action.get('recording_errors') or [])
-            if not isinstance(action_id, str) or not action_id:
-                if 'action_log_missing' not in recording_errors:
-                    recording_errors.append('action_log_missing')
-            model = ensure_complete_mental_model(session)
-            try:
-                assessment = assess_smm(self.llm_client, neutral_evidence, model, reply) if self.llm_client else {
-                    'base_revision': model.get('revision', 0), 'changes': {},
-                    'annotation': {key: 'not_observable' for key in ('explanation_transcription', 'task_model_q1', 'partner_model_q2', 'self_model_q3', 'alignment_q4')},
-                    'valid': True,
-                }
-                if not assessment.get('valid', True):
-                    recording_errors.append('smm_recorder_invalid_output')
-            except Exception as error:
-                print(f'[AgentRunner] SMM recorder failed: {error}')
-                recording_errors.append('smm_recorder_failed')
-                assessment = {'base_revision': model.get('revision', 0), 'changes': {}, 'annotation': {}}
-            update_result = apply_internal_agent_mental_model_patch(session, assessment)
-            record = append_agent_turn_record(
-                session, action_id=action_id, message_id=action.get('message_id'),
-                annotation=assessment.get('annotation'),
+            enqueue_smm_recording_job(
+                session,
                 agent_participant_id=self.participant_id,
+                action_id=action_id,
+                message_id=action.get('message_id'),
+                evidence=neutral_evidence,
+                reply=reply,
                 trajectory_grid_at_reply=follower_trajectory_grid_text(session),
-                recording_errors=recording_errors,
             )
-            record.update({
-                'action_timestamp': datetime.now(timezone.utc).isoformat(),
-                'action_type': source_action.get('type') or 'send_map_guidance',
-                'action_content': reply,
-            })
-            write_agent_annotation_timeline_file(session, session_key)
+        session_module.commit_session(session_key, session)
+        self._start_smm_recording_worker()
+
+    def _resume_smm_recording_worker(self) -> None:
+        session_key, session = find_session_by_identifier(self.session_id)
+        if not session:
+            return
+        if resume_smm_recording_jobs(session, self.participant_id):
             session_module.commit_session(session_key, session)
-            if should_publish_mental_model_update(bool(update_result.get('changed'))):
-                from websocket.handlers import get_socketio
-                room = session.get('session_id') or session_key
-                get_socketio().emit(
-                    'mental_model_updated',
-                    {'session_id': room, 'mental_model': public_mental_model(session)},
-                    room=room,
-                )
+        self._start_smm_recording_worker()
+
+    def _start_smm_recording_worker(self) -> None:
+        with self._smm_worker_lock:
+            if self._smm_worker_thread and self._smm_worker_thread.is_alive():
+                return
+            self._smm_worker_thread = threading.Thread(
+                target=self._run_smm_recording_worker,
+                daemon=True,
+                name=f'smm-recorder-{self.session_id}-{self.participant_id}',
+            )
+            self._smm_worker_thread.start()
+
+    def _run_smm_recording_worker(self) -> None:
+        while True:
+            session_key, session = find_session_by_identifier(self.session_id)
+            if not session:
+                return
+            job = claim_next_smm_recording_job(session, self.participant_id)
+            if not job:
+                return
+            session_module.commit_session(session_key, session)
+            self._record_one_smm_job(session, session_key, job)
+
+    def _record_one_smm_job(self, session: Dict[str, Any], session_key: str, job: Dict[str, Any]) -> None:
+        model = ensure_complete_mental_model(session)
+        recording_errors = [] if isinstance(job.get('action_id'), str) else ['action_log_missing']
+        try:
+            assessment = assess_smm(
+                self.llm_client, job.get('evidence', ''), model, job.get('reply', ''), session_id=session_key,
+            ) if self.llm_client else {'base_revision': model.get('revision', 0), 'changes': {}, 'annotation': {}, 'valid': True}
+            if not assessment.get('valid', True):
+                recording_errors.append('smm_recorder_invalid_output')
+        except Exception as error:
+            print(f'[AgentRunner] SMM recorder failed: {error}')
+            assessment = {'base_revision': model.get('revision', 0), 'changes': {}, 'annotation': {}}
+            recording_errors.append('smm_recorder_failed')
+        update_result = apply_internal_agent_mental_model_patch(session, assessment)
+        record = append_agent_turn_record(
+            session, action_id=job.get('action_id'), message_id=job.get('message_id'),
+            annotation=assessment.get('annotation'), agent_participant_id=self.participant_id,
+            trajectory_grid_at_reply=job.get('trajectory_grid_at_reply'), recording_errors=recording_errors,
+        )
+        record.update({'action_timestamp': datetime.now(timezone.utc).isoformat(), 'action_type': 'send_map_guidance', 'action_content': job.get('reply', '')})
+        finish_smm_recording_job(job, error=','.join(recording_errors) or None)
+        write_agent_annotation_timeline_file(session, session_key)
+        session_module.commit_session(session_key, session)
+        if should_publish_mental_model_update(bool(update_result.get('changed'))):
+            from websocket.handlers import get_socketio
+            room = session.get('session_id') or session_key
+            get_socketio().emit('mental_model_updated', {'session_id': room, 'mental_model': public_mental_model(session)}, room=room)
+
+    def _trajectory_reply_is_duplicate(
+        self, session: Dict[str, Any], decision: Dict[str, Any]
+    ) -> bool:
+        """Suppress a new drawing that still warrants the same immediate advice."""
+        h = decision.get('h')
+        if not isinstance(h, dict):
+            return False
+        gates = session.get('maptask_guide_advice_gate')
+        previous = gates.get(self.participant_id) if isinstance(gates, dict) else None
+        previous_signature = previous.get('signature') if isinstance(previous, dict) else None
+        return should_suppress_trajectory_reply(previous_signature, h)
+
+    def _remember_trajectory_advice(
+        self, session: Dict[str, Any], decision: Dict[str, Any], results: Dict[str, Any]
+    ) -> None:
+        """Persist an advice signature only after a Guide message was sent."""
+        if not any(
+            isinstance(item, dict) and (item.get('action') or {}).get('type') == 'send_map_guidance'
+            for item in (results.get('successful') or [])
+        ):
+            return
+        h = decision.get('h')
+        signature = advice_signature(h) if isinstance(h, dict) else None
+        if not signature:
+            return
+        gates = session.setdefault('maptask_guide_advice_gate', {})
+        gates[self.participant_id] = {
+            'signature': signature,
+            'trajectory_verdict': h.get('trajectory_verdict'),
+            'expected_state': (h.get('misalignment') or {}).get('expected_state'),
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+        }
 
     def _uses_awareness_grounding_pipeline(self, participant: Dict[str, Any], session: Dict[str, Any]) -> bool:
         if not grounding_treatment_enabled():
@@ -1539,21 +1648,19 @@ Response:"""
         participant: Optional[Dict[str, Any]] = None,
         session: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
-        """Call LLM to generate actions and attach both Map Task maps for vision."""
+        """Call LLM to generate actions from the textual prompt evidence."""
         if not self.llm_client:
             # Mock response for testing
             print(f'[AgentRunner] Mock LLM called (no LLM client)')
             return self._mock_llm_response()
         
-        user_content = prompt
-
         try:
             # Use unified LLM client interface
             # Note: response_format is handled by the client implementation
             response = self.llm_client.chat_completions_create(
                 messages=[
                     {"role": "system", "content": "You are an AI agent participating in an economic experiment. Follow the instructions carefully and respond with valid JSON."},
-                    {"role": "user", "content": user_content}
+                    {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
                 max_tokens=4096,

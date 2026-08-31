@@ -77,9 +77,11 @@ def build_guide_map_grid_context(participant: Mapping[str, Any]) -> str:
             )
 
     route_cells = map_data.get("route_cells") or []
+    ordered_route_cells = []
     for raw_cell in route_cells if isinstance(route_cells, list) else []:
         cell = _valid_cell(raw_cell, rows, cols)
         if cell:
+            ordered_route_cells.append([cell[0], cell[1]])
             grid[cell[0]][cell[1]] = "*"
 
     start = _valid_cell(map_data.get("start_cell"), rows, cols)
@@ -98,6 +100,11 @@ def build_guide_map_grid_context(participant: Mapping[str, Any]) -> str:
         f"start: {start if start else 'unknown'}\n"
         f"end: {end if end else 'unknown'}\n"
         "legend: . = empty, # = landmark, * = target route, S = start, F = end\n"
+        "coordinate_system: guide map only; do not use these coordinates as follower drawing coordinates\n"
+        "ordered_route_cells: "
+        f"{json.dumps(ordered_route_cells, separators=(',', ':'))}\n"
+        "ordered_route_cells are start-to-end route evidence. Translate each active segment into "
+        "Follower-local landmark relations before instructing the Follower.\n"
         "landmarks:\n"
         f"{landmarks_text}\n"
         "grid:\n"

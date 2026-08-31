@@ -5,6 +5,7 @@ from copy import deepcopy
 import json
 import os
 import tempfile
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from config.grounding_treatment import grounding_treatment_enabled
@@ -117,6 +118,81 @@ def public_mental_model(session: Mapping[str, Any]) -> dict[str, Any]:
 def should_publish_mental_model_update(changed: bool) -> bool:
     """Keep background control records from becoming a participant UI effect."""
     return bool(changed) and grounding_treatment_enabled()
+
+
+def _smm_job_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def enqueue_smm_recording_job(
+    session: dict[str, Any],
+    *,
+    agent_participant_id: str,
+    action_id: str | None,
+    message_id: str | None,
+    evidence: str,
+    reply: str,
+    trajectory_grid_at_reply: str | None = None,
+) -> dict[str, Any]:
+    """Persist one Guide turn for later, ordered SMM recording."""
+    jobs = session.setdefault("smm_recording_jobs", [])
+    identity = action_id if isinstance(action_id, str) and action_id else message_id
+    for job in jobs:
+        if isinstance(job, dict) and job.get("identity") == identity:
+            return job
+    job = {
+        "identity": identity,
+        "agent_participant_id": agent_participant_id,
+        "action_id": action_id,
+        "message_id": message_id,
+        "evidence": evidence,
+        "reply": reply,
+        "trajectory_grid_at_reply": trajectory_grid_at_reply,
+        "status": "pending",
+        "attempts": 0,
+        "queued_at": _smm_job_timestamp(),
+    }
+    jobs.append(job)
+    return job
+
+
+def claim_next_smm_recording_job(
+    session: dict[str, Any], agent_participant_id: str
+) -> dict[str, Any] | None:
+    """Claim the oldest pending job for one Guide runner."""
+    for job in session.get("smm_recording_jobs", []):
+        if (
+            isinstance(job, dict)
+            and job.get("agent_participant_id") == agent_participant_id
+            and job.get("status") == "pending"
+        ):
+            job["status"] = "processing"
+            job["attempts"] = int(job.get("attempts", 0) or 0) + 1
+            job["started_at"] = _smm_job_timestamp()
+            return job
+    return None
+
+
+def resume_smm_recording_jobs(session: dict[str, Any], agent_participant_id: str) -> int:
+    """Requeue jobs interrupted by a backend restart before completion."""
+    resumed = 0
+    for job in session.get("smm_recording_jobs", []):
+        if (
+            isinstance(job, dict)
+            and job.get("agent_participant_id") == agent_participant_id
+            and job.get("status") == "processing"
+        ):
+            job["status"] = "pending"
+            job.pop("started_at", None)
+            resumed += 1
+    return resumed
+
+
+def finish_smm_recording_job(job: dict[str, Any], *, error: str | None = None) -> None:
+    job["status"] = "failed" if error else "complete"
+    job["finished_at"] = _smm_job_timestamp()
+    if error:
+        job["error"] = error
 
 
 def append_agent_turn_record(

@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from .codebook import definitions_for
-from .contract import parse_h, parse_repair, parse_repair_plan, parse_w
+from .codebook import definitions_for, definitions_for_codes
+from .contract import parse_joint_diagnosis, parse_repair
 from .fewshot_repository import (
     format_h_fewshots,
     format_repair_examples,
@@ -31,6 +30,21 @@ def _call_json(llm_client: Any, prompt: str, max_tokens: int) -> str:
     )
 
 
+def _format_w_repair_context(w: dict[str, Any]) -> str:
+    """Give R only the selected W definitions and their current propositions."""
+    codes = tuple(w.get("w_codes") or ())
+    definitions = definitions_for_codes("W", codes)
+    assessments = w.get("assessments") or ()
+    return (
+        "<W REPAIR CONTEXT>\n"
+        + (definitions or "- no content-level W diagnosis\n")
+        + "\n<CURRENT W PROPOSITIONS>\n"
+        + json.dumps(assessments, ensure_ascii=False)
+        + "\n</CURRENT W PROPOSITIONS>\n"
+        + "</W REPAIR CONTEXT>"
+    )
+
+
 def safe_decide(orchestrator: Any, evidence: str) -> dict[str, Any] | None:
     """Return no grounding decision when diagnosis cannot complete.
 
@@ -48,91 +62,71 @@ class GroundingOrchestrator:
         self._llm = llm_client
 
     def decide(self, evidence: str) -> dict[str, Any]:
-        """Diagnose H/W, select an auditable plan, then draft from current facts."""
-        h_prompt = (
-            (_PROMPTS / "grounding_detection_prompt.txt").read_text(encoding="utf-8")
+        """Jointly diagnose H/W, then select and realize repairs in one LLM call."""
+        diagnosis_prompt = (
+            (_PROMPTS / "grounding_joint_diagnosis_prompt.txt").read_text(encoding="utf-8")
             + "\n\n<H CODEBOOK>\n"
             + definitions_for("H")
             + "\n</H CODEBOOK>\n"
             + format_h_fewshots()
-            + "\n<CURRENT OBSERVABLE EVIDENCE>\n"
+            + "\n\n<W CODEBOOK>\n"
+            + definitions_for("W")
+            + "\n</W CODEBOOK>\n<CURRENT OBSERVABLE EVIDENCE>\n"
             + evidence
             + "\n</CURRENT OBSERVABLE EVIDENCE>"
         )
-        w_prompt = (
-            (_PROMPTS / "grounding_object_prompt.txt").read_text(encoding="utf-8")
-            + "\n\n<W CODEBOOK>\n"
-            + definitions_for("W")
-            + "\n</W CODEBOOK>\nEvidence:\n"
-            + evidence
+        diagnosis = parse_joint_diagnosis(
+            _call_json(self._llm, diagnosis_prompt, 900)
         )
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            h_future = executor.submit(_call_json, self._llm, h_prompt, 400)
-            w_future = executor.submit(_call_json, self._llm, w_prompt, 700)
-            h = parse_h(h_future.result())
-            w = parse_w(w_future.result())
+        h = diagnosis["h"]
+        w = diagnosis["w"]
 
         w_codes = w.get("w_codes", ())
-        if not h or h.get("h_code") == "H7" or not w_codes:
-            return self._no_repair(h, w, w_codes)
+        # H1-H6 are already operational repair triggers. W enriches repair
+        # selection/retrieval, but an empty W diagnosis must not suppress a
+        # concrete, observable H diagnosis.
+        if not h or h.get("h_code") == "H7":
+            decision = self._no_repair(h, w, w_codes)
+            if (
+                h
+                and "<AGENT TRIGGER>\nfollower_trajectory_changed\n</AGENT TRIGGER>" in evidence
+                and h.get("next_guide_action") != "give_next_segment"
+            ):
+                # A correct-but-incomplete or unassessable drawing leaves the
+                # existing instruction in force; do not ask the base Guide to
+                # generate a new, potentially repeated instruction.
+                decision["suppress_base_reply"] = True
+            return decision
 
         retrieved = retrieve_repair_examples(
             evidence, associated_repair_codes(h["h_code"], w_codes)
         )
-        plan_prompt = (
-            (_PROMPTS / "grounding_repair_plan_prompt.txt").read_text(encoding="utf-8")
+        repair_prompt = (
+            (_PROMPTS / "grounding_repair_prompt.txt").read_text(encoding="utf-8")
             + "\n\n<H CODEBOOK>\n"
             + definitions_for("H")
-            + "\n</H CODEBOOK>\n<W CODEBOOK>\n"
-            + definitions_for("W")
-            + "\n</W CODEBOOK>\n<R CODEBOOK>\n"
+            + "\n</H CODEBOOK>\n<R CODEBOOK>\n"
             + definitions_for("R")
             + "\n</R CODEBOOK>\n<DETECTED H>\n"
             + json.dumps(h, ensure_ascii=False)
-            + "\n</DETECTED H>\n<DIAGNOSED W>\n"
-            + json.dumps(w, ensure_ascii=False)
-            + "\n</DIAGNOSED W>\n"
+            + "\n</DETECTED H>\n"
+            + _format_w_repair_context(w)
+            + "\n"
             + format_repair_examples(retrieved)
             + "\n<BASE GUIDE PROMPT>\n"
             + evidence
             + "\n</BASE GUIDE PROMPT>"
         )
-        plan = parse_repair_plan(_call_json(self._llm, plan_prompt, 1000))
-        if not plan:
-            return self._no_repair(h, w, w_codes)
-
-        retrieved_by_id = {example["example_id"]: example for example in retrieved}
-        selected_example_ids = {
-            example_id
-            for step in plan["immediate_steps"]
-            for example_id in step["semantic_example_ids"]
-            if example_id in retrieved_by_id
-        }
-        selected_examples = tuple(
-            example for example in retrieved if example["example_id"] in selected_example_ids
-        )
-        draft_prompt = (
-            (_PROMPTS / "grounding_repair_prompt.txt").read_text(encoding="utf-8")
-            + "\n\n<R CODEBOOK>\n"
-            + definitions_for("R")
-            + "\n</R CODEBOOK>\n<SELECTED REPAIR PLAN>\n"
-            + json.dumps(plan, ensure_ascii=False)
-            + "\n</SELECTED REPAIR PLAN>\n"
-            + format_repair_examples(selected_examples)
-            + "\n<BASE GUIDE PROMPT>\n"
-            + evidence
-            + "\n</BASE GUIDE PROMPT>"
-        )
-        repair = parse_repair(_call_json(self._llm, draft_prompt, 700))
+        repair = parse_repair(_call_json(self._llm, repair_prompt, 800))
         if not repair:
-            return self._no_repair(h, w, w_codes, plan)
-        r_codes = tuple(step["r_code"] for step in plan["immediate_steps"])
-        deferred_r_codes = tuple(step["r_code"] for step in plan["deferred_steps"])
+            return self._no_repair(h, w, w_codes)
+        r_codes = repair["applied_r_codes"]
+        deferred_r_codes = repair["deferred_r_codes"]
         return {
             "h": h,
             "w": w,
             "w_codes": w_codes,
-            "repair_plan": plan,
+            "repair_steps": repair["repair_steps"],
             "r": r_codes[0],
             "r_codes": r_codes,
             "deferred_r_codes": deferred_r_codes,
@@ -143,6 +137,8 @@ class GroundingOrchestrator:
             ),
             "reply": repair["reply"],
             "selection_evidence": repair["selection_evidence"],
+            "needs_base_reply": False,
+            "suppress_base_reply": False,
         }
 
     @staticmethod
@@ -150,13 +146,12 @@ class GroundingOrchestrator:
         h: dict[str, Any],
         w: dict[str, Any],
         w_codes: tuple[str, ...],
-        repair_plan: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "h": h,
             "w": w,
             "w_codes": w_codes,
-            "repair_plan": repair_plan or {},
+            "repair_steps": (),
             "r": None,
             "r_codes": (),
             "deferred_r_codes": (),
@@ -164,4 +159,8 @@ class GroundingOrchestrator:
             "m_codes": ("M5",),
             "reply": "",
             "needs_base_reply": True,
+            "normal_guide_action": (
+                h.get("next_guide_action", "normal_or_wait") if h else "normal_or_wait"
+            ),
+            "suppress_base_reply": False,
         }
