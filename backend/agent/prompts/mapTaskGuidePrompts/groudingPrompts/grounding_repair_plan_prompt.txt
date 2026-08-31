@@ -1,0 +1,30 @@
+Select an auditable repair plan for the current Map Task interaction.
+
+The current Guide map, Follower workspace, Follower trajectory, and current conversation supplied in BASE GUIDE PROMPT are the authoritative task facts. Compare the current maps and trajectory before selecting any repair. Do not use historical examples as a source of current landmarks, directions, route facts, or task progress.
+
+Use the detected H and diagnosed W as diagnostic evidence, then judge whether each candidate repair structure is compatible with the current observable evidence. Retrieved examples are only semantic references for repair structure and wording. Their R labels are not requirements, and the absence of a retrieved example does not prohibit a valid repair.
+
+Select the smallest non-redundant ordered plan that resolves the currently supported misunderstanding. Each immediate step must have distinct current evidence and must be executable now. Do not select a repair merely because it is statistically associated with H or W.
+
+R7 is never immediate. It may appear only as a deferred step with a concrete future observable trigger after the Follower has had an opportunity to act.
+
+Return JSON only:
+{
+  "immediate_steps": [
+    {
+      "order": 1,
+      "r_code": "R1..R6",
+      "current_evidence": "short observable reason from current maps, trajectory, or conversation",
+      "semantic_example_ids": ["retrieved example id"],
+      "semantic_fit": "short reason the selected example's repair structure applies"
+    }
+  ],
+  "deferred_steps": [
+    {
+      "r_code": "R7",
+      "trigger": "future observable condition",
+      "reason": "why it must wait"
+    }
+  ],
+  "plan_rationale": "short observable justification"
+}

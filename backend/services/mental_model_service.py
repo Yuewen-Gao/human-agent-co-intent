@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+import os
+import tempfile
 from typing import Any, Mapping
 
 from config.grounding_treatment import grounding_treatment_enabled
@@ -159,6 +162,67 @@ def append_agent_turn_record(
     record["recording_status"] = "failed" if record["recording_errors"] else "complete"
     session.setdefault("agent_turn_records", []).append(record)
     return record
+
+
+def _format_agent_annotation_timeline(records: Any) -> list[dict[str, Any]]:
+    """Return local Agent records in the same annotation shape used by exports."""
+    timeline: list[dict[str, Any]] = []
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict):
+            continue
+        annotation = record.get("annotation")
+        annotation = annotation if isinstance(annotation, dict) else {}
+        timeline.append(
+            {
+                "action_id": record.get("action_id") or "",
+                "action_timestamp": record.get("action_timestamp") or "",
+                "action_type": record.get("action_type") or "",
+                "action_content": record.get("action_content") or "",
+                "message_id": record.get("message_id") or "",
+                "recording_status": record.get("recording_status") or "complete",
+                "recording_errors": record.get("recording_errors") or [],
+                "annotation": {
+                    key: annotation.get(key) or "" for key in _ANNOTATION_KEYS
+                },
+                "current_smm": record.get("current_smm") or {},
+            }
+        )
+    return timeline
+
+
+def write_agent_annotation_timeline_file(
+    session: Mapping[str, Any],
+    session_id: str,
+    *,
+    logs_base_dir: str | None = None,
+) -> str:
+    """Atomically mirror persisted Agent annotations to the session log directory."""
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ValueError("session_id is required")
+
+    if logs_base_dir is None:
+        from services.action_logger import LOGS_BASE_DIR
+
+        logs_base_dir = LOGS_BASE_DIR
+    session_dir = os.path.join(logs_base_dir, session_id.strip())
+    os.makedirs(session_dir, exist_ok=True)
+    output_path = os.path.join(session_dir, "post_annotations_agent.json")
+    fd, temporary_path = tempfile.mkstemp(
+        dir=session_dir, prefix=".post_annotations_agent_", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(
+                _format_agent_annotation_timeline(session.get("agent_turn_records")),
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
+        os.replace(temporary_path, output_path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+    return output_path
 
 
 def apply_user_mental_model_update(

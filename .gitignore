@@ -4,3 +4,7 @@
 
 # Local-only backend regression tests; excluded from source control.
 backend/tests/
+
+# Local Superpowers plans; never part of the application source.
+docs/superpowers/
+frontend/docs/superpowers/

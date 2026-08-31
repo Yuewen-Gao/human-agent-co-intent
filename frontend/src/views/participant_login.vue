@@ -7,25 +7,13 @@
 
       <form @submit.prevent="handleLogin" class="login-form">
         <div class="input-group">
-          <label for="participantName">Participant Name</label>
-          <input
-            id="participantName"
-            v-model="participantName"
-            type="text"
-            required
-            placeholder="Enter your Participant Name (e.g., Jack)"
-            :disabled="isLoading"
-          />
-        </div>
-
-        <div class="input-group">
-          <label for="sessionName">Session Name</label>
+          <label for="sessionName">Session Key</label>
           <input
             id="sessionName"
             v-model="sessionName"
             type="text"
             required
-            placeholder="Enter Session Name"
+            placeholder="Enter the session key you received"
             :disabled="isLoading"
           />
         </div>
@@ -42,9 +30,9 @@
       <div class="info-section">
         <h3>Instructions</h3>
         <ul>
-          <li>Enter your assigned Participant Name</li>
-          <li>Use Session Name provided by researcher</li>
-          <li>Once logged in, the session will start automatically</li>
+          <li>Enter the session key provided for this study</li>
+          <li>Your session will be created if it does not already exist</li>
+          <li>Returning with the same key continues the same session</li>
           <li>Contact the researcher if you have login issues</li>
         </ul>
       </div>
@@ -59,15 +47,14 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 
 // Reactive state
-const participantName = ref('')
-const sessionName = ref('')  // Empty by default - require user input
+const sessionName = ref('')
 const isLoading = ref(false)
 const errorMessage = ref('')
 
 // Handle form submission
 const handleLogin = async () => {
-  if (!participantName.value.trim() || !sessionName.value.trim()) {
-    errorMessage.value = 'Please enter both participant name and session name'
+  if (!sessionName.value.trim()) {
+    errorMessage.value = 'Please enter your session key'
     return
   }
 
@@ -77,14 +64,13 @@ const handleLogin = async () => {
   try {
     // Using sessionStorage for tab-specific authentication
     // This allows multiple participants to login simultaneously in different tabs
-    const response = await fetch('/api/auth/login', {
+    const response = await fetch('/api/auth/public-session-login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        participant_name: participantName.value.trim(),
-        session_name: sessionName.value.trim()
+        session_key: sessionName.value.trim()
       })
     })
 
@@ -287,4 +273,4 @@ const handleLogin = async () => {
   line-height: 1.5;
   margin: 0;
 }
-</style> 
+</style>

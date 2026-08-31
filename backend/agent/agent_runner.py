@@ -38,6 +38,7 @@ from services.mental_model_service import (
     ensure_complete_mental_model,
     public_mental_model,
     should_publish_mental_model_update,
+    write_agent_annotation_timeline_file,
 )
 from agent.map_task_as_guide.grounding_as_guide.smm_recorder import assess as assess_smm
 
@@ -384,6 +385,7 @@ class AgentRunner:
                 'action_type': source_action.get('type') or 'send_map_guidance',
                 'action_content': reply,
             })
+            write_agent_annotation_timeline_file(session, session_key)
             session_module.commit_session(session_key, session)
             if should_publish_mental_model_update(bool(update_result.get('changed'))):
                 from websocket.handlers import get_socketio

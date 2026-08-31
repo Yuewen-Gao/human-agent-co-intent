@@ -5,6 +5,7 @@ import routes.session as session_module  # Import session module to access sessi
 import os
 import tempfile
 import uuid
+import threading
 from config.experiments import PARTICIPANTS, get_experiment_by_id
 from websocket.handlers import broadcast_participant_update
 import copy
@@ -17,6 +18,7 @@ participant_bp = Blueprint('participant', __name__)
 
 # Access sessions storage from session module
 sessions = session_module.sessions
+_public_session_provision_lock = threading.Lock()
 
 
 def _parse_action_timestamp_sort_key(ts) -> float:
@@ -1420,6 +1422,71 @@ def serve_audio(filename):
 
 
 # handle participant login
+@participant_bp.route('/api/auth/public-session-login', methods=['POST'])
+def handle_public_session_login():
+    """Create or resume the fixed public Map Task session for one session key."""
+    try:
+        data = request.get_json(silent=True) or {}
+        session_key_value = data.get('session_key')
+        if not isinstance(session_key_value, str) or not session_key_value.strip():
+            return jsonify({'success': False, 'message': 'Session key is required'}), 400
+        session_name = session_key_value.strip()
+        if len(session_name) > 512:
+            return jsonify({'success': False, 'message': 'Session key is too long'}), 400
+
+        with _public_session_provision_lock:
+            session_key, found_session = find_session_by_identifier(session_name)
+            created = False
+            if not found_session:
+                from services.public_session_template import create_public_maptask_session
+
+                found_session = create_public_maptask_session(session_name)
+                session_key = found_session['session_id']
+                session_module.commit_session(session_key, found_session)
+                created = True
+
+            participant = find_participant_by_name('Human', found_session)
+            agent = find_participant_by_name('Agent', found_session)
+            if not participant or not agent:
+                return jsonify({
+                    'success': False,
+                    'message': 'This session is not a public Map Task session',
+                }), 409
+
+            participant['login_time'] = datetime.now(timezone.utc).isoformat()
+            participant['status'] = 'online'
+            update_participant_experiment_params(participant, found_session)
+            update_participant_experiment_params(agent, found_session)
+            _register_participant_agent_runner(found_session, session_key, agent)
+            session_module.commit_session(session_key, found_session)
+
+        broadcast_session_id = found_session.get('session_id') or session_key
+        broadcast_participant_update(
+            session_id=broadcast_session_id,
+            participants=found_session.get('participants', []),
+            session_info=found_session,
+            update_type='partial',
+        )
+
+        participant_response = participant.copy()
+        participant_response['participant_id'] = participant.get('id')
+        return jsonify({
+            'success': True,
+            'created': created,
+            'token': f"{session_key}:{participant.get('id', '')}",
+            'participant': participant_response,
+            'session': {
+                'session_id': found_session.get('session_id'),
+                'session_code': found_session.get('session_name'),
+                'session_name': found_session.get('session_name'),
+                'experiment_type': found_session.get('experiment_type'),
+                'status': found_session.get('status'),
+            },
+        }), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @participant_bp.route('/api/auth/login', methods=['POST'])
 def handle_participant_login():
     try:
