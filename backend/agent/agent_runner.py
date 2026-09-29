@@ -10,6 +10,7 @@ This module is responsible for:
 import threading
 import time
 import json
+import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
@@ -49,6 +50,11 @@ from services.mental_model_service import (
     write_agent_annotation_timeline_file,
 )
 from agent.map_task_as_guide.grounding_as_guide.smm_recorder import assess as assess_smm
+from services.agent_reply_status import (
+    emit_agent_reply_status,
+    should_publish_agent_reply_status,
+)
+from services.llm_trace_logger import TraceContext, record_trace_result, trace_chat_completion
 
 
 class AgentRunner:
@@ -212,6 +218,7 @@ class AgentRunner:
         trigger_context: str = 'periodic_check',
     ):
         """Perceive environment and generate/execute actions"""
+        reply_status_active = False
         try:
             try:
                 from services.realtime_session_config import session_includes_meeting_room
@@ -224,6 +231,19 @@ class AgentRunner:
             if not participant:
                 print(f'[AgentRunner] Participant {self.participant_id} not found')
                 return
+
+            if should_publish_agent_reply_status(
+                experiment_type=self.experiment_type,
+                participant_role=participant.get('role'),
+                trigger_context=trigger_context,
+            ):
+                emit_agent_reply_status(
+                    session_id=str(session.get('session_id') or session_key),
+                    agent_participant_id=self.participant_id,
+                    active=True,
+                    trigger_context=trigger_context,
+                )
+                reply_status_active = True
             
             # For hiddenprofile, check if initial vote is needed before proceeding
             if self.experiment_type == 'hiddenprofile':
@@ -264,11 +284,20 @@ class AgentRunner:
                 )
             trajectory_triggered = trigger_context == 'follower_trajectory_changed'
             pending_trajectory_decision: Dict[str, Any] | None = None
+            trace_context = None
+            if self.experiment_type == 'maptask' and str(participant.get('role') or '').lower() == 'guide':
+                trace_context = TraceContext(
+                    session_id=str(session.get('session_id') or self.session_id),
+                    participant_id=self.participant_id,
+                    turn_id=str(uuid.uuid4()),
+                    stage='agent.action',
+                    trigger_context=trigger_context,
+                )
 
             # c2 Map Task Guide: use the two-stage grounding pipeline only when
             # the existing Awareness Dashboard exposes follower map progress.
             if self._uses_awareness_grounding_pipeline(participant, session):
-                decision = safe_decide(GroundingOrchestrator(self.llm_client), prompt)
+                decision = safe_decide(GroundingOrchestrator(self.llm_client), prompt, trace_context=trace_context)
                 if decision is None:
                     print('[AgentRunner] Grounding pipeline unavailable; using normal Guide reply path')
                 else:
@@ -285,8 +314,15 @@ class AgentRunner:
                             'type': 'send_map_guidance',
                             'content': reply,
                         }])
+                        repair_completion = decision.get('_trace_repair_completion')
+                        if repair_completion:
+                            record_trace_result(
+                                repair_completion,
+                                {key: value for key, value in decision.items() if not key.startswith('_trace_')},
+                                execution_result=results,
+                            )
                         self._remember_trajectory_advice(session, decision, results)
-                        self._record_guide_turn(session, session_key, prompt, results)
+                        self._record_guide_turn(session, session_key, prompt, results, trace_context=trace_context)
                         print(f"[AgentRunner] grounding pipeline sent {len(results.get('successful', []))} guidance action(s)")
                         return
                     if decision.get('normal_guide_action') == 'give_next_segment':
@@ -313,7 +349,7 @@ class AgentRunner:
             # print(f'{"="*80}\n')
             
             # Call LLM to generate actions
-            response = self._call_llm(prompt, participant, session)
+            response, action_completion = self._call_llm(prompt, participant, session, trace_context=trace_context)
             
             if not response:
                 print(f'[AgentRunner] No response from LLM for participant {self.participant_id}')
@@ -328,15 +364,19 @@ class AgentRunner:
             # recorder, never by the reply agent's JSON payload.
             
             if not actions:
+                if action_completion:
+                    record_trace_result(action_completion, {"actions": []}, error="no_actions_after_parse")
                 print(f'[AgentRunner] No actions generated for participant {self.participant_id}')
                 return
             
             # Execute actions
             results = self.protocol.execute_actions(actions)
+            if action_completion:
+                record_trace_result(action_completion, {"actions": actions}, execution_result=results)
             if self.experiment_type == 'maptask' and str(participant.get('role') or '').lower() == 'guide':
                 if pending_trajectory_decision:
                     self._remember_trajectory_advice(session, pending_trajectory_decision, results)
-                self._record_guide_turn(session, session_key, prompt, results)
+                self._record_guide_turn(session, session_key, prompt, results, trace_context=trace_context)
             
             # After actions are executed, re-fetch participant to get updated state (including read_essays)
             # This ensures the next perception cycle has the latest data
@@ -361,6 +401,17 @@ class AgentRunner:
             print(f'[AgentRunner] Error in perceive_and_act: {e}')
             import traceback
             traceback.print_exc()
+        finally:
+            if reply_status_active:
+                try:
+                    emit_agent_reply_status(
+                        session_id=str(session.get('session_id') or session_key),
+                        agent_participant_id=self.participant_id,
+                        active=False,
+                        trigger_context=trigger_context,
+                    )
+                except Exception as e:
+                    print(f'[AgentRunner] Error clearing reply status: {e}')
 
     def request_perception(
         self,
@@ -391,7 +442,7 @@ class AgentRunner:
             self._message_trigger_timer.daemon = True
             self._message_trigger_timer.start()
 
-    def _record_guide_turn(self, session: Dict[str, Any], session_key: str, prompt: str, results: Dict[str, Any]) -> None:
+    def _record_guide_turn(self, session: Dict[str, Any], session_key: str, prompt: str, results: Dict[str, Any], *, trace_context: TraceContext | None = None) -> None:
         """Persist SMM jobs immediately; recording itself runs outside the reply lock."""
         guidance_actions = [
             item for item in (results.get('successful') or [])
@@ -410,6 +461,12 @@ class AgentRunner:
                 evidence=neutral_evidence,
                 reply=reply,
                 trajectory_grid_at_reply=follower_trajectory_grid_text(session),
+                trace_origin={
+                    'session_id': trace_context.session_id,
+                    'participant_id': trace_context.participant_id,
+                    'turn_id': trace_context.turn_id,
+                    'trigger_context': trace_context.trigger_context,
+                } if trace_context else None,
             )
         session_module.commit_session(session_key, session)
         self._start_smm_recording_worker()
@@ -447,9 +504,18 @@ class AgentRunner:
     def _record_one_smm_job(self, session: Dict[str, Any], session_key: str, job: Dict[str, Any]) -> None:
         model = ensure_complete_mental_model(session)
         recording_errors = [] if isinstance(job.get('action_id'), str) else ['action_log_missing']
+        origin = job.get('trace_origin') if isinstance(job.get('trace_origin'), dict) else {}
+        smm_trace_context = TraceContext(
+            session_id=str(origin.get('session_id') or session.get('session_id') or self.session_id),
+            participant_id=str(origin.get('participant_id') or self.participant_id),
+            turn_id=str(origin.get('turn_id') or uuid.uuid4()),
+            stage='smm.update',
+            trigger_context=str(origin.get('trigger_context') or 'smm_recording'),
+        )
         try:
             assessment = assess_smm(
                 self.llm_client, job.get('evidence', ''), model, job.get('reply', ''), session_id=session_key,
+                trace_context=smm_trace_context,
             ) if self.llm_client else {'base_revision': model.get('revision', 0), 'changes': {}, 'annotation': {}, 'valid': True}
             if not assessment.get('valid', True):
                 recording_errors.append('smm_recorder_invalid_output')
@@ -520,7 +586,10 @@ class AgentRunner:
 
     def _record_grounding_decision(self, session: Dict[str, Any], session_key: str, decision: Dict[str, Any]) -> None:
         audit = session.setdefault('grounding_decisions', [])
-        audit.append({'timestamp': datetime.now(timezone.utc).isoformat(), **decision})
+        audit.append({
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            **{key: value for key, value in decision.items() if not key.startswith('_trace_')},
+        })
         session_module.commit_session(session_key, session)
 
     def _trigger_vote(self, vote_type: str, participant: Dict[str, Any], session: Dict[str, Any], session_key: str) -> bool:
@@ -588,7 +657,7 @@ class AgentRunner:
         print(f'[AgentRunner] HiddenProfile: Vote prompt:\n{vote_prompt}')
         
         # Call LLM
-        response = self._call_llm(vote_prompt, participant)
+        response, _ = self._call_llm(vote_prompt, participant)
         if not response:
             print(f'[AgentRunner] HiddenProfile: LLM returned no response')
             return False
@@ -1647,33 +1716,35 @@ Response:"""
         prompt: str,
         participant: Optional[Dict[str, Any]] = None,
         session: Optional[Dict[str, Any]] = None,
-    ) -> Optional[str]:
+        trace_context: TraceContext | None = None,
+    ) -> tuple[Optional[str], Any | None]:
         """Call LLM to generate actions from the textual prompt evidence."""
         if not self.llm_client:
             # Mock response for testing
             print(f'[AgentRunner] Mock LLM called (no LLM client)')
-            return self._mock_llm_response()
+            return self._mock_llm_response(), None
         
         try:
             # Use unified LLM client interface
             # Note: response_format is handled by the client implementation
-            response = self.llm_client.chat_completions_create(
-                messages=[
-                    {"role": "system", "content": "You are an AI agent participating in an economic experiment. Follow the instructions carefully and respond with valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=4096,
-                response_format={"type": "json_object"}  # Request JSON response
-            )
+            messages = [
+                {"role": "system", "content": "You are an AI agent participating in an economic experiment. Follow the instructions carefully and respond with valid JSON."},
+                {"role": "user", "content": prompt}
+            ]
+            completion = None
+            if trace_context is None:
+                response = self.llm_client.chat_completions_create(messages=messages, temperature=0.7, max_tokens=4096, response_format={"type": "json_object"})
+            else:
+                completion = trace_chat_completion(self.llm_client, trace_context, messages=messages, temperature=0.7, max_tokens=4096, response_format={"type": "json_object"})
+                response = completion.response
             
-            return response
+            return response, completion
             
         except Exception as e:
             print(f'[AgentRunner] Error calling LLM: {e}')
             import traceback
             traceback.print_exc()
-            return None
+            return None, None
     
     def _mock_llm_response(self) -> str:
         """Mock LLM response for testing"""

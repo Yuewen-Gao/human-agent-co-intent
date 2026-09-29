@@ -6,7 +6,7 @@ import TradeForm from '../components/TradeForm.vue'
 import BaseComponent from '../components/BaseComponent.vue'
 import MeetingRoom from '../components/MeetingRoom.vue'
 import MentalModelPanel from '../views/mental_model_panel.vue'
-import { sendMessage as wsSendMessage, getSocket, onMessageReceived, offMessageReceived, emitTypingIndicator, onTypingIndicator, onMentalModelUpdated, emitMentalModelUpdate, onMentalModelUpdateError } from '../services/websocket.js'
+import { sendMessage as wsSendMessage, getSocket, onMessageReceived, offMessageReceived, emitTypingIndicator, onTypingIndicator, onAgentReplyStatus, onMentalModelUpdated, emitMentalModelUpdate, onMentalModelUpdateError } from '../services/websocket.js'
 import { captureActionContextSafe } from '../composables/useActionCapture.js'
 
 const props = defineProps({
@@ -597,6 +597,28 @@ const remoteTypingBanner = computed(() => {
     return `${head}, and ${last} are typing`
 })
 
+const replyingAgents = ref({})
+
+const handleAgentReplyStatus = (payload) => {
+    const currentSessionId = String(sessionId.value || '')
+    if (!payload?.agent_participant_id || !currentSessionId) return
+    if (String(payload.session_id || '') !== currentSessionId) return
+    const agentId = String(payload.agent_participant_id)
+    if (payload.active) {
+        replyingAgents.value = { ...replyingAgents.value, [agentId]: true }
+    } else if (replyingAgents.value[agentId]) {
+        const { [agentId]: _cleared, ...remaining } = replyingAgents.value
+        replyingAgents.value = remaining
+    }
+}
+
+const agentReplyBanner = computed(() => {
+    const selectedId = selectedParticipantId.value
+    if (!selectedId || !replyingAgents.value[String(selectedId)]) return ''
+    const name = getParticipantName(selectedId) || 'The agent'
+    return `${name} is preparing a reply…`
+})
+
 watch(
     () => props.typeIndicatorEnabled,
     (on) => {
@@ -1090,11 +1112,13 @@ watch(otherParticipants, (newParticipants) => {
 // Register WebSocket message listener on mount
 let cleanupMessageListener = null
 let cleanupTypingListener = null
+let cleanupAgentReplyStatusListener = null
 let cleanupMentalModelListener = null
 let cleanupMentalModelErrorListener = null
 onMounted(() => {
     cleanupMessageListener = onMessageReceived(handleMessageReceived)
     cleanupTypingListener = onTypingIndicator(handleTypingIndicatorEvent)
+    cleanupAgentReplyStatusListener = onAgentReplyStatus(handleAgentReplyStatus)
     cleanupMentalModelListener = onMentalModelUpdated(handleMentalModelUpdated)
     cleanupMentalModelErrorListener = onMentalModelUpdateError(loadMentalModel)
     loadMentalModel()
@@ -1115,6 +1139,9 @@ onUnmounted(() => {
     }
     if (cleanupTypingListener) {
         cleanupTypingListener()
+    }
+    if (cleanupAgentReplyStatusListener) {
+        cleanupAgentReplyStatusListener()
     }
     if (cleanupMentalModelListener) {
         cleanupMentalModelListener()
@@ -1327,6 +1354,10 @@ onUnmounted(() => {
                     </div>
 
                     <div v-if="typeIndicatorEnabled && remoteTypingBanner" class="typing-indicator-banner">{{ remoteTypingBanner }}</div>
+                    <div v-if="agentReplyBanner" class="agent-reply-status" role="status">
+                        <span class="agent-reply-status-dot" aria-hidden="true"></span>
+                        {{ agentReplyBanner }}
+                    </div>
                     <div class="message-input-area">
                         <input
                             v-if="hasTextMedia"
@@ -1717,6 +1748,30 @@ onUnmounted(() => {
     font-size: 12px;
     color: #6b7280;
     font-style: italic;
+}
+
+.agent-reply-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 7px 12px 2px;
+  color: #4f46e5;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.agent-reply-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6366f1;
+  animation: agent-reply-status-pulse 1s ease-in-out infinite;
+}
+
+@keyframes agent-reply-status-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
 }
 
 .message-input-area {

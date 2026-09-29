@@ -10,6 +10,7 @@ from __future__ import annotations
 ENABLE_GROUNDING_TREATMENT = True
 
 
+
 def grounding_treatment_enabled() -> bool:
     return bool(ENABLE_GROUNDING_TREATMENT)
 

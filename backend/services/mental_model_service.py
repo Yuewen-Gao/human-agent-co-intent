@@ -133,6 +133,7 @@ def enqueue_smm_recording_job(
     evidence: str,
     reply: str,
     trajectory_grid_at_reply: str | None = None,
+    trace_origin: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist one Guide turn for later, ordered SMM recording."""
     jobs = session.setdefault("smm_recording_jobs", [])
@@ -148,6 +149,7 @@ def enqueue_smm_recording_job(
         "evidence": evidence,
         "reply": reply,
         "trajectory_grid_at_reply": trajectory_grid_at_reply,
+        "trace_origin": dict(trace_origin) if isinstance(trace_origin, Mapping) else None,
         "status": "pending",
         "attempts": 0,
         "queued_at": _smm_job_timestamp(),

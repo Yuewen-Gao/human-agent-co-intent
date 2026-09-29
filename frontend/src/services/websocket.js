@@ -436,5 +436,28 @@ export function offTypingIndicator(callback) {
   }
 }
 
+const agentReplyStatusCallbacks = new Map()
+
+/** Subscribe to server-owned lifecycle events for visible AI replies. */
+export function onAgentReplyStatus(callback) {
+  const ws = getSocket()
+  const wrapped = (payload) => {
+    try {
+      callback(payload)
+    } catch (error) {
+      console.error('[WebSocket] Error in agent_reply_status callback:', error)
+    }
+  }
+  agentReplyStatusCallbacks.set(callback, wrapped)
+  ws.on('agent_reply_status', wrapped)
+  return () => {
+    const w = agentReplyStatusCallbacks.get(callback)
+    if (w && ws) {
+      ws.off('agent_reply_status', w)
+      agentReplyStatusCallbacks.delete(callback)
+    }
+  }
+}
+
 // Export socket for direct access if needed
 export { socket }

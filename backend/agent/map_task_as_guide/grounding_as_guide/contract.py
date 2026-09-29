@@ -11,6 +11,12 @@ VALID_R_CODES = frozenset(f"R{i}" for i in range(1, 8))
 VALID_TRAJECTORY_VERDICTS = frozenset({
     "correct", "incorrect", "insufficient_evidence", "not_applicable",
 })
+VALID_TRAJECTORY_RELATIONS = frozenset({
+    "advances", "completes", "departs", "not_assessable", "not_applicable",
+})
+VALID_ACTIVE_SEGMENT_SOURCES = frozenset({
+    "latest_visible_instruction", "guide_route", "both", "not_applicable",
+})
 
 
 def parse_json_object(raw: str) -> dict[str, Any]:
@@ -55,7 +61,21 @@ def parse_h(raw: str) -> dict[str, Any]:
     trajectory_verdict = value.get("trajectory_verdict")
     if not isinstance(trajectory_verdict, str) or trajectory_verdict not in VALID_TRAJECTORY_VERDICTS:
         return {}
-    if code == "H4" and trajectory_verdict != "incorrect":
+    raw_assessment = value.get("trajectory_assessment")
+    raw_assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
+    trajectory_assessment = {
+        "active_segment": str(raw_assessment.get("active_segment", "")).strip(),
+        "active_segment_source": str(raw_assessment.get("active_segment_source", "")).strip(),
+        "fresh_trace_relation": str(raw_assessment.get("fresh_trace_relation", "")).strip(),
+        "observable_departure": str(raw_assessment.get("observable_departure", "")).strip(),
+    }
+    if code == "H4" and (
+        trajectory_verdict != "incorrect"
+        or not trajectory_assessment["active_segment"]
+        or trajectory_assessment["active_segment_source"] not in VALID_ACTIVE_SEGMENT_SOURCES - {"not_applicable"}
+        or trajectory_assessment["fresh_trace_relation"] != "departs"
+        or not trajectory_assessment["observable_departure"]
+    ):
         return {}
     next_guide_action = "repair" if code != "H7" else "normal_or_wait"
     if code == "H7" and value.get("next_guide_action") == "give_next_segment":
@@ -69,6 +89,7 @@ def parse_h(raw: str) -> dict[str, Any]:
         "misalignment": misalignment,
         "route_replan": route_replan,
         "trajectory_verdict": trajectory_verdict,
+        "trajectory_assessment": trajectory_assessment,
         "next_guide_action": next_guide_action,
     }
 
@@ -126,8 +147,28 @@ def parse_joint_diagnosis(raw: str) -> dict[str, Any]:
 
 
 def parse_repair(raw: str) -> dict[str, Any]:
-    """Validate one combined, inspectable repair-selection and reply result."""
+    """Validate R metadata plus its Map Task action-envelope reply."""
     value = parse_json_object(raw)
+    raw_actions = value.get("actions")
+    if raw_actions is not None:
+        if not isinstance(raw_actions, list):
+            return {}
+        action_replies = [
+            str(action.get("content", "")).strip()
+            for action in raw_actions
+            if (
+                isinstance(action, dict)
+                and action.get("type") == "send_map_guidance"
+                and str(action.get("content", "")).strip()
+            )
+        ]
+        if len(action_replies) != 1:
+            return {}
+        reply = action_replies[0]
+    else:
+        # Keep legacy traces and isolated tests readable while new R prompts
+        # use the same action envelope as the main Guide agent.
+        reply = str(value.get("reply", "")).strip()
     raw_steps = value.get("repair_steps")
     repair_steps = []
     used_codes: set[str] = set()
@@ -175,7 +216,7 @@ def parse_repair(raw: str) -> dict[str, Any]:
             code for code in value.get("deferred_r_codes", [])
             if isinstance(code, str) and code in VALID_R_CODES
         )) if isinstance(value.get("deferred_r_codes", []), list) else (),
-        "reply": str(value.get("reply", "")),
+        "reply": reply,
         "adds_missing_detail": str(value.get("adds_missing_detail", "false")).lower() == "true",
         "selection_evidence": str(value.get("selection_evidence", "")).strip(),
     }

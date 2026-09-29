@@ -6,7 +6,8 @@ services:
   backend:
     build: ./backend
     ports:
-      - "${BACKEND_PORT:-5000}:5000"
+      # Keep the same local default as the bundled-Postgres Compose setup.
+      - "${BACKEND_PORT:-5001}:5000"
     env_file:
       - path: .env
         required: false

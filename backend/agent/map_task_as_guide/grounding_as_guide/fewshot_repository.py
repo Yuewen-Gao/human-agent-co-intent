@@ -193,28 +193,43 @@ def _token_overlap_score(current_evidence: str, example: dict[str, Any]) -> floa
 
 
 def retrieve_repair_examples(
-    current_evidence: str, associated_r_codes: tuple[str, ...], *, max_examples: int = 5
+    current_evidence: str,
+    h_code: str,
+    w_codes: tuple[str, ...],
+    associated_r_codes: tuple[str, ...],
 ) -> tuple[dict[str, Any], ...]:
-    """Cover H/W-associated R examples, then fill by text similarity."""
+    """Choose one H-preserving example for each statistically associated R.
+
+    Candidate R-code ordering is decided upstream from H+W, H, and W
+    association statistics.  Retrieval must not cross H diagnoses: within each
+    candidate R, prefer an example sharing a currently selected W code, then
+    fall back to the same H with that R.  No unrelated examples are added just
+    to fill the prompt.
+    """
     examples = runtime_repair_examples()
     scored = sorted(
         ((-_token_overlap_score(current_evidence, example), example) for example in examples),
         key=lambda item: (item[0], item[1]["example_id"]),
     )
     chosen: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
+    selected_w = set(w_codes)
     for r_code in associated_r_codes:
-        match = next((example for _, example in scored if example["r_code"] == r_code), None)
+        h_matches = [
+            example for _, example in scored
+            if example["h_code"] == h_code and example["r_code"] == r_code
+        ]
+        match = next(
+            (
+                example for example in h_matches
+                if selected_w.intersection(example["w_codes"])
+            ),
+            None,
+        )
+        if match is None and h_matches:
+            match = h_matches[0]
         if match:
             chosen.append(match)
-            seen_ids.add(match["example_id"])
-    for _, example in scored:
-        if len(chosen) >= max_examples:
-            break
-        if example["example_id"] not in seen_ids:
-            chosen.append(example)
-            seen_ids.add(example["example_id"])
-    return tuple(chosen[:max_examples])
+    return tuple(chosen)
 
 
 def format_repair_examples(examples: tuple[dict[str, Any], ...]) -> str:

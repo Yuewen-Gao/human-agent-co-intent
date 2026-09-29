@@ -88,7 +88,7 @@ docker compose up --build -d
 
 By default, services are available at:
 - Frontend: `http://localhost:8080`
-- Backend API: `http://localhost:5000`
+- Backend API: `http://localhost:5001`
 
 Researcher/participant pages:
 - `http://localhost:8080/researcher`

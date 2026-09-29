@@ -6,9 +6,11 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from dataclasses import replace
 
 from .codebook import definitions_for
 from .mental_model_update import MENTAL_MODEL_FIELD_KEYS
+from services.llm_trace_logger import TraceContext, record_trace_result, trace_chat_completion
 
 _PROMPT = Path(__file__).resolve().parents[2] / "prompts" / "mapTaskGuidePrompts" / "groudingPrompts" / "smm_recorder_prompt.txt"
 _ANNOTATION_KEYS = ("explanation_transcription", "task_model_q1", "partner_model_q2", "self_model_q3", "alignment_q4")
@@ -102,14 +104,18 @@ def assess(
     final_reply: str,
     *,
     session_id: str | None = None,
+    trace_context: TraceContext | None = None,
 ) -> dict[str, Any]:
-    response = llm_client.chat_completions_create(
-        messages=[{"role": "user", "content": record_prompt(evidence, model, final_reply)}],
-        temperature=0,
-        max_tokens=1200,
-        response_format={"type": "json_object"},
-    )
+    messages = [{"role": "user", "content": record_prompt(evidence, model, final_reply)}]
+    completion = None
+    if trace_context is None:
+        response = llm_client.chat_completions_create(messages=messages, temperature=0, max_tokens=1200, response_format={"type": "json_object"})
+    else:
+        completion = trace_chat_completion(llm_client, replace(trace_context, stage="smm.update"), messages=messages, temperature=0, max_tokens=1200, response_format={"type": "json_object"})
+        response = completion.response
     assessment = parse_recorder_output(response, int(model.get("revision", 0) or 0))
+    if completion:
+        record_trace_result(completion, assessment, error=assessment.get("parse_error"))
     if not assessment["valid"] and session_id:
         write_invalid_output_debug_record(
             session_id,

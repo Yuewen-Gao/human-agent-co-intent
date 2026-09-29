@@ -72,7 +72,7 @@ docker compose up --build
 
 After startup:
 - Frontend: [http://localhost:8080](http://localhost:8080)
-- Backend API: [http://localhost:5000](http://localhost:5000)
+- Backend API: [http://localhost:5001](http://localhost:5001)
 - Researcher Dashboard: [http://localhost:8080/researcher](http://localhost:8080/researcher)
 - Participant Login: [http://localhost:8080/login](http://localhost:8080/login)
 
@@ -130,7 +130,9 @@ python -m scripts.init_db
 python app.py
 ```
 
-Default backend URL: `http://localhost:5000`
+Default backend URL when running directly from source: `http://localhost:5000`
+
+Docker Compose publishes the backend at `http://localhost:5001` by default.
 
 ### Frontend
 
