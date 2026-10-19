@@ -203,12 +203,12 @@ def append_maptask_grid_context(
     *,
     agent_participant_id: str | None = None,
 ) -> str:
-    """Append current grids and, after a Guide reply, the trajectory cell delta."""
-    sections = [
-        build_guide_map_grid_context(participant),
-        build_follower_current_workspace_context(session),
-        build_follower_trajectory_change_context(session, agent_participant_id),
-    ]
+    """Append only the Map Task context this agent role is allowed to inspect."""
+    role = str(participant.get("role") or "guide").strip().lower()
+    sections = [build_follower_current_workspace_context(session)]
+    if role == "guide":
+        sections.insert(0, build_guide_map_grid_context(participant))
+        sections.append(build_follower_trajectory_change_context(session, agent_participant_id))
     content = "\n".join(section for section in sections if section)
     return f"{prompt}\n{content}\n" if content else prompt
 
@@ -336,10 +336,7 @@ def append_session_conversation_memory(
 ) -> str:
     """Append reconstructed visible conversation history to an agent prompt."""
     memory = build_session_conversation_memory(agent_participant_id, session)
-    if not memory:
-        return prompt
     new_messages = build_new_visible_messages(agent_participant_id, session)
-    result = f"{prompt}\n<SESSION CONVERSATION MEMORY>\n{memory}\n</SESSION CONVERSATION MEMORY>\n"
-    if new_messages:
-        result += f"<NEW VISIBLE MESSAGES>\n{new_messages}\n</NEW VISIBLE MESSAGES>\n"
+    result = f"{prompt}\n<SESSION CONVERSATION MEMORY>\n{memory or 'None'}\n</SESSION CONVERSATION MEMORY>\n"
+    result += f"<NEW VISIBLE MESSAGES>\n{new_messages or 'None'}\n</NEW VISIBLE MESSAGES>\n"
     return result

@@ -14,9 +14,6 @@ VALID_TRAJECTORY_VERDICTS = frozenset({
 VALID_TRAJECTORY_RELATIONS = frozenset({
     "advances", "completes", "departs", "not_assessable", "not_applicable",
 })
-VALID_ACTIVE_SEGMENT_SOURCES = frozenset({
-    "latest_visible_instruction", "guide_route", "both", "not_applicable",
-})
 
 
 def parse_json_object(raw: str) -> dict[str, Any]:
@@ -32,47 +29,17 @@ def parse_h(raw: str) -> dict[str, Any]:
     code = value.get("h_code")
     if not isinstance(code, str) or code not in VALID_H_CODES:
         return {}
-    raw_misalignment = value.get("misalignment")
-    raw_misalignment = raw_misalignment if isinstance(raw_misalignment, dict) else {}
-    misalignment = {
-        "expected_state": str(raw_misalignment.get("expected_state", "")).strip(),
-        "observed_state": str(raw_misalignment.get("observed_state", "")).strip(),
-        "what_is_misaligned": str(raw_misalignment.get("what_is_misaligned", "")).strip(),
-    }
-    # A repair code without a concrete, inspectable mismatch cannot safely
-    # drive a participant-facing repair message.
-    if code != "H7" and not all(misalignment.values()):
-        return {}
-    raw_replan = value.get("route_replan")
-    raw_replan = raw_replan if isinstance(raw_replan, dict) else {}
-    route_replan = {
-        "required": raw_replan.get("required") is True,
-        "confirmed_prefix": str(raw_replan.get("confirmed_prefix", "")).strip(),
-        "guide_route_basis": str(raw_replan.get("guide_route_basis", "")).strip(),
-        "follower_local_target": str(raw_replan.get("follower_local_target", "")).strip(),
-        "completion_criterion": str(raw_replan.get("completion_criterion", "")).strip(),
-    }
-    if route_replan["required"] and not all(
-        route_replan[key] for key in (
-            "confirmed_prefix", "guide_route_basis", "follower_local_target", "completion_criterion",
-        )
-    ):
-        return {}
     trajectory_verdict = value.get("trajectory_verdict")
     if not isinstance(trajectory_verdict, str) or trajectory_verdict not in VALID_TRAJECTORY_VERDICTS:
         return {}
     raw_assessment = value.get("trajectory_assessment")
     raw_assessment = raw_assessment if isinstance(raw_assessment, dict) else {}
     trajectory_assessment = {
-        "active_segment": str(raw_assessment.get("active_segment", "")).strip(),
-        "active_segment_source": str(raw_assessment.get("active_segment_source", "")).strip(),
         "fresh_trace_relation": str(raw_assessment.get("fresh_trace_relation", "")).strip(),
         "observable_departure": str(raw_assessment.get("observable_departure", "")).strip(),
     }
     if code == "H4" and (
         trajectory_verdict != "incorrect"
-        or not trajectory_assessment["active_segment"]
-        or trajectory_assessment["active_segment_source"] not in VALID_ACTIVE_SEGMENT_SOURCES - {"not_applicable"}
         or trajectory_assessment["fresh_trace_relation"] != "departs"
         or not trajectory_assessment["observable_departure"]
     ):
@@ -86,8 +53,6 @@ def parse_h(raw: str) -> dict[str, Any]:
         "h_code": code,
         "confidence": str(value.get("confidence", "low")),
         "evidence": str(value.get("evidence", "")),
-        "misalignment": misalignment,
-        "route_replan": route_replan,
         "trajectory_verdict": trajectory_verdict,
         "trajectory_assessment": trajectory_assessment,
         "next_guide_action": next_guide_action,
@@ -113,20 +78,17 @@ def parse_w(raw: str) -> dict[str, Any]:
             continue
         code = assessment.get("w_code")
         evidence = assessment.get("evidence")
-        proposition = assessment.get("proposition")
-        alignment_needed = assessment.get("alignment_needed")
+        repair_focus = assessment.get("repair_focus")
         if (
             isinstance(code, str)
             and code in codes
             and isinstance(evidence, str) and evidence.strip()
-            and isinstance(proposition, str) and proposition.strip()
-            and isinstance(alignment_needed, str) and alignment_needed.strip()
+            and isinstance(repair_focus, str) and repair_focus.strip()
         ):
             assessment_by_code.setdefault(code, {
                 "w_code": code,
                 "evidence": evidence.strip(),
-                "proposition": proposition.strip(),
-                "alignment_needed": alignment_needed.strip(),
+                "repair_focus": repair_focus.strip(),
             })
 
     codes = [code for code in codes if code in assessment_by_code]

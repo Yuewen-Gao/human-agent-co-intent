@@ -80,13 +80,21 @@ class OpenAIClient(LLMClient):
         **kwargs
     ) -> str:
         model = model or self.default_model
-        
+        request_kwargs = {
+            "model": model,
+            "messages": messages,
+            **kwargs,
+        }
+        if not str(model).startswith("gpt-5"):
+            request_kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            # GPT-5.6's Chat Completions endpoint rejects the legacy
+            # `max_tokens` field in favour of `max_completion_tokens`.
+            token_field = "max_completion_tokens" if str(model).startswith("gpt-5") else "max_tokens"
+            request_kwargs[token_field] = max_tokens
+
         response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs
+            **request_kwargs,
         )
         
         return response.choices[0].message.content

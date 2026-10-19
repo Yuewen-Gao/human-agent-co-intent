@@ -360,6 +360,7 @@ def restore_running_agent_runners() -> None:
     """Recreate in-memory runners for persisted sessions that were running at startup."""
     try:
         from agent.agent_runner import get_agent_runner, register_agent_runner
+        from routes.participant import apply_maptask_ai_role_switch
 
         for session_key, session in sessions.items():
             if session.get('status') != 'running':
@@ -369,6 +370,8 @@ def restore_running_agent_runners() -> None:
             experiment_type = session.get('experiment_type')
             if not experiment_type:
                 continue
+            if str(experiment_type).lower() == 'maptask':
+                apply_maptask_ai_role_switch(session)
 
             restored = False
             for participant in session.get('participants', []):
@@ -571,8 +574,12 @@ def update_session(session_identifier):
             try:
                 from agent.agent_runner import register_agent_runner
                 from websocket.handlers import broadcast_participant_update
+                from routes.participant import apply_maptask_ai_role_switch
                 participants = found_session.get('participants', [])
                 session_id = found_session.get('session_id') or session_key
+
+                if str(experiment_id).lower() == 'maptask':
+                    apply_maptask_ai_role_switch(found_session)
                 
                 updated_participants = []
                 agents_registered = False
@@ -632,6 +639,10 @@ def update_session(session_identifier):
         # If status changed to 'running', start all agent runners
         if status_changed_to_running:
             try:
+                if str(found_session.get('experiment_type') or '').lower() == 'maptask':
+                    from routes.participant import apply_maptask_ai_role_switch
+                    apply_maptask_ai_role_switch(found_session)
+                    commit_session(session_key, found_session)
                 from agent.agent_runner import (
                     get_agent_runner,
                     register_agent_runner,
@@ -845,6 +856,14 @@ def update_session_status(session_identifier, new_status, started_at=None, remai
         # Update status
         old_status = found_session.get('status')
         found_session['status'] = new_status
+
+        if (
+            new_status == 'running'
+            and old_status != 'running'
+            and str(found_session.get('experiment_type') or '').lower() == 'maptask'
+        ):
+            from routes.participant import apply_maptask_ai_role_switch
+            apply_maptask_ai_role_switch(found_session)
         
         # Update started_at if provided
         if started_at is not None:

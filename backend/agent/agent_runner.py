@@ -11,6 +11,7 @@ import threading
 import time
 import json
 import uuid
+import hashlib
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
@@ -32,10 +33,10 @@ from agent.map_task_as_guide.agent_session_context import (
 from agent.map_task_as_guide.grounding_as_guide.mental_model_update import (
     append_mental_model_reply_context,
 )
-from agent.map_task_as_guide.grounding_as_guide.orchestrator import GroundingOrchestrator, safe_decide
-from agent.map_task_as_guide.grounding_as_guide.trajectory_gate import (
-    advice_signature,
-    should_suppress_trajectory_reply,
+from agent.map_task_as_guide.grounding_as_guide.orchestrator import (
+    GroundingOrchestrator,
+    parse_follower_action_decision,
+    safe_decide,
 )
 from services.mental_model_service import (
     append_agent_turn_record,
@@ -50,6 +51,7 @@ from services.mental_model_service import (
     write_agent_annotation_timeline_file,
 )
 from agent.map_task_as_guide.grounding_as_guide.smm_recorder import assess as assess_smm
+from agent.map_task_as_follower.context import latest_visible_human_guide_message_context
 from services.agent_reply_status import (
     emit_agent_reply_status,
     should_publish_agent_reply_status,
@@ -275,6 +277,11 @@ class AgentRunner:
             prompt = self._build_prompt(participant, session, perception)
             if (
                 self.experiment_type == 'maptask'
+                and str(participant.get('role') or '').lower() == 'follower'
+            ):
+                prompt += '\n' + latest_visible_human_guide_message_context(self.participant_id, session)
+            if (
+                self.experiment_type == 'maptask'
                 and str(participant.get('role') or '').lower() == 'guide'
             ):
                 prompt += (
@@ -282,8 +289,16 @@ class AgentRunner:
                     + trigger_context
                     + '\n</AGENT TRIGGER>'
                 )
-            trajectory_triggered = trigger_context == 'follower_trajectory_changed'
-            pending_trajectory_decision: Dict[str, Any] | None = None
+            elif (
+                self.experiment_type == 'maptask'
+                and str(participant.get('role') or '').lower() == 'follower'
+            ):
+                prompt += (
+                    '\n<FOLLOWER EVENT>\n'
+                    'A new visible human Guide message triggered this decision. '
+                    'Use only that newest instruction and your current Follower workspace.\n'
+                    '</FOLLOWER EVENT>'
+                )
             trace_context = None
             if self.experiment_type == 'maptask' and str(participant.get('role') or '').lower() == 'guide':
                 trace_context = TraceContext(
@@ -305,9 +320,6 @@ class AgentRunner:
                     if decision.get('suppress_base_reply'):
                         print('[AgentRunner] trajectory verdict leaves current guidance unchanged')
                         return
-                    if trajectory_triggered and self._trajectory_reply_is_duplicate(session, decision):
-                        print('[AgentRunner] duplicate trajectory advice suppressed')
-                        return
                     reply = str(decision.get('reply') or '').strip()
                     if reply:
                         results = self.protocol.execute_actions([{
@@ -321,12 +333,10 @@ class AgentRunner:
                                 {key: value for key, value in decision.items() if not key.startswith('_trace_')},
                                 execution_result=results,
                             )
-                        self._remember_trajectory_advice(session, decision, results)
                         self._record_guide_turn(session, session_key, prompt, results, trace_context=trace_context)
                         print(f"[AgentRunner] grounding pipeline sent {len(results.get('successful', []))} guidance action(s)")
                         return
                     if decision.get('normal_guide_action') == 'give_next_segment':
-                        pending_trajectory_decision = decision
                         prompt += (
                             '\n<GROUNDING HANDOFF>\n'
                             'The fresh Follower trajectory completed the active intended segment. '
@@ -358,8 +368,17 @@ class AgentRunner:
             # Debug: Print LLM response
             participant_name = participant.get("name") or participant.get("participant_name")
             
-            # Parse response
-            actions = self._parse_response(response)
+            is_maptask_follower = (
+                self.experiment_type == 'maptask'
+                and str(participant.get('role') or '').lower() == 'follower'
+            )
+            # The Follower uses a deliberately narrow execute-or-ask gate, not
+            # the Guide's JSON action schema or its Grounding pipeline.
+            actions = (
+                self._follower_actions_from_decision(response, participant, session)
+                if is_maptask_follower
+                else self._parse_response(response)
+            )
             # Map Task SMM updates are produced by the independent post-reply
             # recorder, never by the reply agent's JSON payload.
             
@@ -374,8 +393,6 @@ class AgentRunner:
             if action_completion:
                 record_trace_result(action_completion, {"actions": actions}, execution_result=results)
             if self.experiment_type == 'maptask' and str(participant.get('role') or '').lower() == 'guide':
-                if pending_trajectory_decision:
-                    self._remember_trajectory_advice(session, pending_trajectory_decision, results)
                 self._record_guide_turn(session, session_key, prompt, results, trace_context=trace_context)
             
             # After actions are executed, re-fetch participant to get updated state (including read_essays)
@@ -537,39 +554,6 @@ class AgentRunner:
             from websocket.handlers import get_socketio
             room = session.get('session_id') or session_key
             get_socketio().emit('mental_model_updated', {'session_id': room, 'mental_model': public_mental_model(session)}, room=room)
-
-    def _trajectory_reply_is_duplicate(
-        self, session: Dict[str, Any], decision: Dict[str, Any]
-    ) -> bool:
-        """Suppress a new drawing that still warrants the same immediate advice."""
-        h = decision.get('h')
-        if not isinstance(h, dict):
-            return False
-        gates = session.get('maptask_guide_advice_gate')
-        previous = gates.get(self.participant_id) if isinstance(gates, dict) else None
-        previous_signature = previous.get('signature') if isinstance(previous, dict) else None
-        return should_suppress_trajectory_reply(previous_signature, h)
-
-    def _remember_trajectory_advice(
-        self, session: Dict[str, Any], decision: Dict[str, Any], results: Dict[str, Any]
-    ) -> None:
-        """Persist an advice signature only after a Guide message was sent."""
-        if not any(
-            isinstance(item, dict) and (item.get('action') or {}).get('type') == 'send_map_guidance'
-            for item in (results.get('successful') or [])
-        ):
-            return
-        h = decision.get('h')
-        signature = advice_signature(h) if isinstance(h, dict) else None
-        if not signature:
-            return
-        gates = session.setdefault('maptask_guide_advice_gate', {})
-        gates[self.participant_id] = {
-            'signature': signature,
-            'trajectory_verdict': h.get('trajectory_verdict'),
-            'expected_state': (h.get('misalignment') or {}).get('expected_state'),
-            'updated_at': datetime.now(timezone.utc).isoformat(),
-        }
 
     def _uses_awareness_grounding_pipeline(self, participant: Dict[str, Any], session: Dict[str, Any]) -> bool:
         if not grounding_treatment_enabled():
@@ -776,12 +760,21 @@ Response:"""
         if 'read_essays' not in participant and read_essays_backup:
             participant['read_essays'] = read_essays_backup
         
+        is_maptask_follower = (
+            (self.experiment_type or '').lower() == 'maptask'
+            and str(participant.get('role') or '').lower() == 'follower'
+        )
         perception = {
             'public_state': self._get_public_state(session),
             'private_state': self._get_private_state(participant),
             'agent_actions': self._get_agent_actions(participant, session),
-            'interactions': self._get_interactions(participant, session),
-            'other_participants': self._get_other_participants_state(participant, session)
+            # Map Task uses the cursor-aware <NEW VISIBLE MESSAGES> block.
+            # Do not also inject the generic accumulated unread-message list.
+            'interactions': {} if (self.experiment_type or '').lower() == 'maptask' else self._get_interactions(participant, session),
+            # The Guide awareness dashboard is a Guide-only affordance. Do not
+            # let a future dashboard option accidentally add hidden Guide data
+            # to the AI Follower's prompt.
+            'other_participants': [] if is_maptask_follower else self._get_other_participants_state(participant, session)
         }
         
         return perception
@@ -1768,6 +1761,55 @@ Response:"""
             print(f'[AgentRunner] Error parsing LLM response: {e}')
             print(f'[AgentRunner] Response: {response[:200]}...')
             return []
+
+    def _follower_actions_from_decision(
+        self, response: str, participant: Dict[str, Any], session: Dict[str, Any]
+    ) -> list[Dict[str, Any]]:
+        """Translate one orchestrator-validated Follower decision into a public action."""
+        decision = parse_follower_action_decision(response)
+        if not decision:
+            return []
+        guide = next(
+            (
+                p for p in (session.get('participants') or [])
+                if isinstance(p, dict)
+                and str(p.get('type') or '').lower() not in ('ai', 'ai_agent')
+                and str(p.get('role') or '').lower() == 'guide'
+            ),
+            None,
+        )
+        recipient = (guide or {}).get('name') or (guide or {}).get('participant_name')
+        if not recipient:
+            return []
+        if decision['decision'] == 'ask_clarification':
+            return [{'type': 'message', 'recipient': recipient, 'content': decision['question']}]
+
+        latest_message_id = next(
+            (
+                str(message.get('id') or '')
+                for message in reversed(session.get('messages') or [])
+                if isinstance(message, dict)
+                and str(message.get('sender') or '') == str((guide or {}).get('id') or '')
+            ),
+            '',
+        )
+        source_message_id = decision['source_message_id'] or latest_message_id
+        if not source_message_id:
+            return []
+        key_data = {
+            'source_message_id': source_message_id,
+            'path_points': decision['path_points'],
+        }
+        idempotency_key = hashlib.sha256(
+            json.dumps(key_data, separators=(',', ':'), sort_keys=True).encode('utf-8')
+        ).hexdigest()
+        return [{
+            'type': 'send_follower_update',
+            'content': decision['message'] or 'Route updated.',
+            'source_message_id': source_message_id,
+            'path_points': decision['path_points'],
+            'idempotency_key': idempotency_key,
+        }]
     
     def _load_prompt_template(self, participant: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """Load prompt template for the experiment type (supports role-specific prompts)"""
@@ -1781,7 +1823,11 @@ Response:"""
             else:
                 prompt_name = 'wordguessing_guesser'
         else:
-            prompt_name = f'{self.experiment_type}_agent'
+            role = str((participant or {}).get('role') or '').strip().lower()
+            if self.experiment_type == 'maptask' and role == 'follower':
+                prompt_name = 'maptask_follower_agent'
+            else:
+                prompt_name = f'{self.experiment_type}_agent'
         
         # Try relative to this file (most reliable)
         current_dir = os.path.dirname(os.path.abspath(__file__))

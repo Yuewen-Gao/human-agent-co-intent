@@ -347,6 +347,8 @@ class AgentContextProtocol:
             return str(action.get('shape', ''))
         if action_type == 'send_map_guidance':
             return (action.get('content') or '')[:200]
+        if action_type == 'send_follower_update':
+            return (action.get('content') or '')[:200]
         return str(action)[:200]
 
 
@@ -1854,6 +1856,126 @@ def _execute_send_map_guidance_maptask(
     }
 
 
+def _visible_latest_human_guide_message(
+    session: Dict[str, Any], agent_participant_id: str
+) -> Dict[str, Any] | None:
+    """Return the newest human Guide message visible to this AI Follower."""
+    participants = session.get('participants') or []
+    by_id = {
+        (p.get('id') or p.get('participant_id')): p
+        for p in participants
+        if isinstance(p, dict) and (p.get('id') or p.get('participant_id'))
+    }
+    for message in reversed(session.get('messages') or []):
+        if not isinstance(message, dict):
+            continue
+        sender = by_id.get(message.get('sender'))
+        if not sender:
+            continue
+        if str(sender.get('type') or '').lower() in ('ai', 'ai_agent'):
+            continue
+        if str(sender.get('role') or '').lower() != 'guide':
+            continue
+        receiver = message.get('receiver')
+        if receiver is None or receiver == agent_participant_id:
+            return message
+    return None
+
+
+def _execute_send_follower_update_maptask(
+    self: AgentContextProtocol,
+    action: Dict[str, Any],
+    participant: Dict[str, Any],
+    session: Dict[str, Any],
+    session_key: str,
+) -> Dict[str, Any]:
+    """Apply one validated AI Follower segment and publish its server snapshot."""
+    if str(participant.get('role') or '').strip().lower() != 'follower':
+        return {'success': False, 'action': action, 'error': 'Only follower participants can update a follower route'}
+    content = str(action.get('content') or '').strip()
+    source_message_id = str(action.get('source_message_id') or '').strip()
+    idempotency_key = str(action.get('idempotency_key') or '').strip()
+    if not content or not source_message_id or not idempotency_key:
+        return {'success': False, 'action': action, 'error': 'Follower update needs content, source_message_id, and idempotency_key'}
+
+    latest = _visible_latest_human_guide_message(session, self.participant_id)
+    if not latest or latest.get('id') != source_message_id:
+        return {'success': False, 'action': action, 'error': 'Follower update must cite the latest visible human Guide message'}
+
+    applied_keys = session.get('maptask_follower_update_keys')
+    applied_keys = applied_keys if isinstance(applied_keys, dict) else {}
+    participant_keys = applied_keys.get(self.participant_id)
+    participant_keys = participant_keys if isinstance(participant_keys, list) else []
+    if idempotency_key in participant_keys:
+        return {'success': True, 'action': action, 'idempotent': True}
+
+    from agent.map_task_as_follower.trajectory_snapshot import apply_route_update
+    params = participant.get('experiment_params')
+    params = params if isinstance(params, dict) else {}
+    current_progress = params.get('map_progress')
+    try:
+        updated_progress, snapshot = apply_route_update(current_progress, action.get('path_points'))
+    except ValueError as error:
+        return {'success': False, 'action': action, 'error': str(error)}
+
+    # All potentially failing validation is finished before these session mutations.
+    participants = session.get('participants') or []
+    recipient = next(
+        (
+            p for p in participants
+            if isinstance(p, dict)
+            and str(p.get('type') or '').lower() not in ('ai', 'ai_agent')
+            and str(p.get('role') or '').lower() == 'guide'
+        ),
+        None,
+    )
+    if not recipient:
+        return {'success': False, 'action': action, 'error': 'Human Guide recipient not found'}
+    actual_session_id = session.get('session_id') or session_key
+    message = {
+        'id': str(uuid.uuid4()),
+        'session_id': actual_session_id,
+        'sender': self.participant_id,
+        'receiver': recipient.get('id') or recipient.get('participant_id'),
+        # The full Follower map is sent as structured `map_progress` data for
+        # the Guide Info Dashboard. Keep the chat message concise.
+        'content': content,
+        'message_type': 'text',
+        'timestamp': utc_now_iso_z(),
+        'follower_route_update': {
+            'source_message_id': source_message_id,
+            'idempotency_key': idempotency_key,
+            'path_points': action.get('path_points'),
+        },
+    }
+    participant['experiment_params'] = {**params, 'map_progress': updated_progress}
+    if 'messages' not in session:
+        session['messages'] = []
+    session['messages'].append(message)
+    for p in participants:
+        p_id = p.get('id') or p.get('participant_id')
+        if p_id in {self.participant_id, message['receiver']}:
+            p.setdefault('messages', []).append(message)
+    next_keys = dict(applied_keys)
+    next_keys[self.participant_id] = [*participant_keys, idempotency_key][-100:]
+    session['maptask_follower_update_keys'] = next_keys
+    session_module.commit_session(session_key, session)
+    broadcast_participant_update(
+        session_id=actual_session_id,
+        participants=participants,
+        session_info=session,
+        update_type='partial',
+    )
+    get_socketio().emit('message_received', message, room=actual_session_id)
+    return {
+        'success': True,
+        'action': action,
+        'message_id': message['id'],
+        'new_cell_count': len(action.get('path_points') or []),
+        'recipient': recipient.get('name') or recipient.get('participant_name'),
+    }
+
+
 # ============================================================================
 # Register action handlers for each experiment type
 # ============================================================================
@@ -1881,6 +2003,7 @@ def _register_all_handlers():
 
     # MapTask handlers
     register_action_handler('maptask', 'send_map_guidance', _execute_send_map_guidance_maptask)
+    register_action_handler('maptask', 'send_follower_update', _execute_send_follower_update_maptask)
     
     # WordGuessing handlers (only message, which is already handled as common action)
 

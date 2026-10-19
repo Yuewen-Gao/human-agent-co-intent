@@ -14,6 +14,7 @@ from services.llm_trace_logger import TraceContext, record_trace_result, trace_c
 
 _PROMPT = Path(__file__).resolve().parents[2] / "prompts" / "mapTaskGuidePrompts" / "groudingPrompts" / "smm_recorder_prompt.txt"
 _ANNOTATION_KEYS = ("explanation_transcription", "task_model_q1", "partner_model_q2", "self_model_q3", "alignment_q4")
+SMM_UPDATE_MAX_TOKENS = 2048
 
 
 def parse_recorder_output(raw: str, revision: int) -> dict[str, Any]:
@@ -109,9 +110,9 @@ def assess(
     messages = [{"role": "user", "content": record_prompt(evidence, model, final_reply)}]
     completion = None
     if trace_context is None:
-        response = llm_client.chat_completions_create(messages=messages, temperature=0, max_tokens=1200, response_format={"type": "json_object"})
+        response = llm_client.chat_completions_create(messages=messages, temperature=0, max_tokens=SMM_UPDATE_MAX_TOKENS, response_format={"type": "json_object"})
     else:
-        completion = trace_chat_completion(llm_client, replace(trace_context, stage="smm.update"), messages=messages, temperature=0, max_tokens=1200, response_format={"type": "json_object"})
+        completion = trace_chat_completion(llm_client, replace(trace_context, stage="smm.update"), messages=messages, temperature=0, max_tokens=SMM_UPDATE_MAX_TOKENS, response_format={"type": "json_object"})
         response = completion.response
     assessment = parse_recorder_output(response, int(model.get("revision", 0) or 0))
     if completion:

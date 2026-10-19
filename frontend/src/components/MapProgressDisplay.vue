@@ -22,6 +22,59 @@ const filledCellsSet = computed(() => {
   return new Set(Array.isArray(arr) ? arr : [])
 })
 const canvasDataUrl = computed(() => props.mapProgress?.canvasDataUrl ?? null)
+const followerSnapshot = computed(() => {
+  const snapshot = props.mapProgress?.agent_follower_dashboard_snapshot
+  if (!snapshot || !Array.isArray(snapshot.grid_size) || snapshot.grid_size.length !== 2) return null
+  const rows = Number(snapshot.grid_size[0])
+  const cols = Number(snapshot.grid_size[1])
+  if (!Number.isInteger(rows) || !Number.isInteger(cols) || rows <= 0 || cols <= 0) return null
+
+  const toCellSet = (cells) => new Set(
+    (Array.isArray(cells) ? cells : [])
+      .filter(cell => Array.isArray(cell) && cell.length === 2)
+      .map(([row, col]) => `${Number(row)},${Number(col)}`)
+  )
+  return {
+    rows,
+    cols,
+    landmarkCells: toCellSet(snapshot.landmark_cells),
+    routeCells: toCellSet(snapshot.route_cells),
+    newCells: toCellSet(snapshot.new_cells)
+  }
+})
+
+const followerSnapshotCells = computed(() => {
+  if (!followerSnapshot.value) return []
+  const { rows, cols } = followerSnapshot.value
+  return Array.from({ length: rows * cols }, (_, index) => ({
+    row: Math.floor(index / cols),
+    col: index % cols
+  }))
+})
+
+const followerSnapshotStyle = computed(() => {
+  if (!followerSnapshot.value) return {}
+  return {
+    gridTemplateColumns: `repeat(${followerSnapshot.value.cols}, minmax(0, 1fr))`,
+    gridTemplateRows: `repeat(${followerSnapshot.value.rows}, minmax(0, 1fr))`,
+    aspectRatio: `${followerSnapshot.value.cols} / ${followerSnapshot.value.rows}`
+  }
+})
+
+const followerCellKind = (row, col) => {
+  const snapshot = followerSnapshot.value
+  if (!snapshot) return 'empty'
+  const key = `${row},${col}`
+  if (snapshot.newCells.has(key)) return 'new'
+  if (snapshot.routeCells.has(key)) return 'route'
+  if (snapshot.landmarkCells.has(key)) return 'landmark'
+  return 'empty'
+}
+
+const followerCellSymbol = (row, col) => {
+  const symbols = { landmark: '#', route: '*', new: '+' }
+  return symbols[followerCellKind(row, col)] || ''
+}
 
 const mapType = computed(() => {
   if (!map.value?.filename) return null
@@ -76,8 +129,22 @@ watch(() => props.mapProgress?.map, () => {
 <template>
   <div v-if="!mapProgress" class="map-progress-empty">No map progress yet</div>
   <div v-else class="map-progress-display" :class="{ 'map-progress-display--fill': fillHeight }">
+    <div v-if="followerSnapshot" class="follower-snapshot-shell">
+      <div class="follower-snapshot-legend" aria-label="Map legend">
+        <span><b>#</b> landmark</span><span><b>*</b> earlier route</span><span><b>+</b> added this turn</span>
+      </div>
+      <div class="follower-snapshot-grid" :style="followerSnapshotStyle" aria-label="AI Follower full map">
+        <span
+          v-for="cell in followerSnapshotCells"
+          :key="`${cell.row}-${cell.col}`"
+          class="follower-snapshot-cell"
+          :class="`follower-snapshot-cell--${followerCellKind(cell.row, cell.col)}`"
+          :title="`${followerCellSymbol(cell.row, cell.col) || 'empty'} at row ${cell.row}, column ${cell.col}`"
+        >{{ followerCellSymbol(cell.row, cell.col) }}</span>
+      </div>
+    </div>
     <!-- Image: show map with canvas overlay -->
-    <div v-if="mapType === 'image'" class="map-progress-image" :class="{ 'map-progress-image--fill': fillHeight }">
+    <div v-else-if="mapType === 'image'" class="map-progress-image" :class="{ 'map-progress-image--fill': fillHeight }">
       <div class="image-wrapper" :class="{ 'image-wrapper--fill': fillHeight }">
         <img
           :src="mapUrl"
@@ -133,6 +200,62 @@ watch(() => props.mapProgress?.map, () => {
   align-items: center;
   justify-content: center;
 }
+
+.follower-snapshot-shell {
+  width: min(100%, 280px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.map-progress-display--fill .follower-snapshot-shell {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.follower-snapshot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 10px;
+  color: #4b5563;
+  font-size: 11px;
+}
+
+.follower-snapshot-legend b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.follower-snapshot-grid {
+  display: grid;
+  width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+}
+
+.map-progress-display--fill .follower-snapshot-grid {
+  width: auto;
+  height: min(100%, 100vw);
+  max-width: 100%;
+}
+
+.follower-snapshot-cell {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  color: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(5px, 0.9vw, 11px);
+  line-height: 1;
+}
+
+.follower-snapshot-cell--landmark { background: #64748b; color: #f8fafc; }
+.follower-snapshot-cell--route { background: #2563eb; color: #eff6ff; }
+.follower-snapshot-cell--new { background: #f97316; color: #fff7ed; }
 
 .map-progress-image {
   position: relative;

@@ -1,4 +1,4 @@
-"""Session-room status events for visible Map Task Guide replies."""
+"""Session-room status events for visible Map Task AI replies."""
 from __future__ import annotations
 
 from typing import Any
@@ -16,11 +16,17 @@ def should_publish_agent_reply_status(
     participant_role: str | None,
     trigger_context: str | None,
 ) -> bool:
-    """Return whether this request represents a user-visible Guide reply."""
+    """Return whether this request represents a user-visible AI reply."""
     return (
         str(experiment_type or "").lower() == "maptask"
-        and str(participant_role or "").lower() == "guide"
         and str(trigger_context or "") in VISIBLE_AGENT_REPLY_TRIGGERS
+        and (
+            str(participant_role or "").lower() == "guide"
+            or (
+                str(participant_role or "").lower() == "follower"
+                and str(trigger_context or "") == "follower_message"
+            )
+        )
     )
 
 

@@ -47,6 +47,53 @@ def _find_participant(found_session, participant_id):
     return None
 
 
+def apply_maptask_ai_role_switch(found_session) -> None:
+    """Make the human and AI Map Task roles complementary to the central switch.
+
+    This is intentionally invoked only at agent registration/recovery, never on
+    every perception. When a role changes, its map binding is rebuilt for the
+    new role while old trajectory progress remains in the session record.
+    """
+    if not isinstance(found_session, dict) or str(found_session.get('experiment_type') or '').lower() != 'maptask':
+        return
+    from config.grounding_treatment import maptask_agent_role
+
+    ai_role = maptask_agent_role()
+    human_role = 'guide' if ai_role == 'follower' else 'follower'
+    for candidate in found_session.get('participants', []) or []:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_type = str(candidate.get('type') or '').lower()
+        expected_role = ai_role if candidate_type in ('ai', 'ai_agent') else human_role
+        if str(candidate.get('role') or '').lower() == expected_role:
+            continue
+        candidate['role'] = expected_role
+        params = candidate.get('experiment_params')
+        params = dict(params) if isinstance(params, dict) else {}
+        # `update_participant_experiment_params` preserves an existing map by
+        # default, so clear only that derived binding on a deliberate role swap.
+        params.pop('map', None)
+        candidate['experiment_params'] = params
+        update_participant_experiment_params(candidate, found_session)
+
+    # Sessions created before the Dashboard overlay existed already have a
+    # normalized AI Follower grid. Upgrade it once without treating old cells
+    # as fresh additions.
+    for candidate in found_session.get('participants', []) or []:
+        if (
+            not isinstance(candidate, dict)
+            or str(candidate.get('type') or '').lower() not in ('ai', 'ai_agent')
+            or str(candidate.get('role') or '').lower() != 'follower'
+        ):
+            continue
+        params = candidate.get('experiment_params')
+        progress = params.get('map_progress') if isinstance(params, dict) else None
+        if not isinstance(progress, dict) or progress.get('agent_follower_dashboard_snapshot'):
+            continue
+        from agent.map_task_as_follower.trajectory_snapshot import ensure_dashboard_snapshot
+        params['map_progress'] = ensure_dashboard_snapshot(progress)
+
+
 def _register_participant_agent_runner(found_session, session_key, participant) -> bool:
     """Register/start agent runner for an AI participant when experiment_type is available."""
     participant_type = (participant.get('type') or '').lower()
@@ -57,6 +104,12 @@ def _register_participant_agent_runner(found_session, session_key, participant) 
     if not experiment_type:
         participant['status'] = 'online'
         return True
+
+    # One server-owned Map Task role switch applies regardless of whether this
+    # runner was created through the setup roster or the legacy register route.
+    # In the default guide setting this preserves the existing participant role.
+    if str(experiment_type).lower() == 'maptask':
+        apply_maptask_ai_role_switch(found_session)
 
     try:
         from agent.agent_runner import register_agent_runner
@@ -1294,8 +1347,10 @@ def register_agent_guide(session_identifier, participant_id):
         if not participant:
             return jsonify({'success': False, 'error': 'Participant not found'}), 404
 
+        from config.grounding_treatment import maptask_agent_role
+
         participant['type'] = 'ai'
-        participant['role'] = 'guide'
+        participant['role'] = maptask_agent_role()
         update_participant_experiment_params(participant, found_session)
 
         if not _register_participant_agent_runner(found_session, session_key, participant):

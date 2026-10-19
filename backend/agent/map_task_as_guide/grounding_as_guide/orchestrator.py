@@ -23,6 +23,84 @@ from services.llm_trace_logger import TraceContext, record_trace_result, trace_c
 _PROMPTS = Path(__file__).resolve().parents[2] / "prompts" / "mapTaskGuidePrompts" / "groudingPrompts"
 _CURRENT_GAME_STATE_MARKER = "\n\n<CURRENT GAME STATE>\n"
 
+# GPT-5.6 Luna may use completion tokens for reasoning before emitting the
+# required JSON. Leave enough budget for both the diagnosis and its payload.
+JOINT_DIAGNOSIS_MAX_TOKENS = 4096
+REPAIR_MAX_TOKENS = 2048
+
+
+# The Follower's historical execute-or-ask contract remains a compatibility
+# boundary, but its validation belongs to orchestration rather than a separate
+# "clarification gate" policy module. It validates only the public payload;
+# semantic ambiguity and route geometry are decided elsewhere.
+_VALID_FOLLOWER_DECISIONS = frozenset({"execute", "ask_clarification"})
+
+
+def _validated_follower_path_points(value: Any) -> list[list[int]] | None:
+    if not isinstance(value, list) or not value:
+        return None
+    points: list[list[int]] = []
+    for item in value:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            return None
+        try:
+            row, col = int(item[0]), int(item[1])
+        except (TypeError, ValueError):
+            return None
+        points.append([row, col])
+    return points
+
+
+def _decision_text(value: dict[str, Any], field: str) -> str:
+    candidate = value.get(field)
+    return candidate.strip() if isinstance(candidate, str) else ""
+
+
+def parse_follower_action_decision(raw: str) -> dict[str, Any]:
+    """Validate the legacy Follower public action envelope.
+
+    This is deliberately not a clarification policy: the model chooses its
+    action, while the orchestrator admits only one well-formed public action.
+    Route geometry and latest-message checks remain server-side at execution.
+    """
+    try:
+        value = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+
+    decision = value.get("decision")
+    if decision not in _VALID_FOLLOWER_DECISIONS:
+        return {}
+
+    if decision == "execute":
+        path_points = _validated_follower_path_points(value.get("path_points"))
+        if not path_points:
+            return {}
+        return {
+            "decision": "execute",
+            "source_message_id": _decision_text(value, "source_message_id"),
+            "segment": _decision_text(value, "segment"),
+            "completion_criterion": _decision_text(value, "completion_criterion"),
+            "message": _decision_text(value, "message"),
+            "path_points": path_points,
+            "question": "",
+        }
+
+    question = _decision_text(value, "question")
+    if not question:
+        return {}
+    return {
+        "decision": "ask_clarification",
+        "source_message_id": "",
+        "segment": "",
+        "completion_criterion": "",
+        "message": "",
+        "path_points": [],
+        "question": question,
+    }
+
 
 def _joint_diagnosis_prompt(evidence: str) -> str:
     """Combine the canonical H/W rules with one non-conflicting response contract."""
@@ -40,7 +118,7 @@ def _joint_diagnosis_prompt(evidence: str) -> str:
         + "\n</W CODEBOOK>\n\n<H FEW-SHOT REFERENCE ONLY>\n"
         + "Examples are reference-only labeled patterns, not part of the current episode. "
         + "Do not treat an example utterance, landmark, route, or expected output as current evidence. "
-        + "Do not copy example content into H, W, evidence, or misalignment fields. "
+        + "Do not copy example content into H, W, evidence, or repair-focus fields. "
         + "Classify only facts inside the later <CURRENT OBSERVABLE EVIDENCE> block.\n"
         + format_h_fewshots()
         + "\n</H FEW-SHOT REFERENCE ONLY>\n\n<CURRENT OBSERVABLE EVIDENCE>\n"
@@ -52,23 +130,13 @@ def _joint_diagnosis_prompt(evidence: str) -> str:
         + "return one JSON object only, not two separate objects.\n"
         + '{"h":{"h_code":"H1..H7","confidence":"low|medium|high",'
         + '"evidence":"short observable detection cue",'
-        + '"misalignment":{"expected_state":"specific visible instruction, map relation, or task state",'
-        + '"observed_state":"specific visible reply, trajectory, or workspace state",'
-        + '"what_is_misaligned":"short concrete difference"},'
-        + '"route_replan":{"required":true|false,"confirmed_prefix":"completed route evidence or unknown",'
-        + '"guide_route_basis":"current ordered Guide-route segment or not needed",'
-        + '"follower_local_target":"next target expressed only through Follower-map landmarks/relations or not needed",'
-        + '"completion_criterion":"what final route segment/end must be reached or not needed"},'
         + '"trajectory_verdict":"correct|incorrect|insufficient_evidence|not_applicable",'
-        + '"trajectory_assessment":{"active_segment":"current landmark-relative segment or empty",'
-        + '"active_segment_source":"latest_visible_instruction|guide_route|both|not_applicable",'
-        + '"fresh_trace_relation":"advances|completes|departs|not_assessable|not_applicable",'
+        + '"trajectory_assessment":{"fresh_trace_relation":"advances|completes|departs|not_assessable|not_applicable",'
         + '"observable_departure":"specific landmark-relative departure or empty"},'
         + '"next_guide_action":"repair|give_next_segment|normal_or_wait"},'
         + '"w":{"w_codes":["W1..W13"],"assessments":[{"w_code":"W1..W13",'
         + '"evidence":"short observable support",'
-        + '"proposition":"the concrete task-relevant claim/relation",'
-        + '"alignment_needed":"the exact shared content that must be established"}]}}\n'
+        + '"repair_focus":"neutral sentence describing what the reply should clarify"}]}}\n'
         + "</JOINT H/W RESPONSE CONTRACT>"
     )
 
@@ -82,16 +150,16 @@ def _call_json(llm_client: Any, prompt: str, max_tokens: int, *, trace_context: 
 
 
 def _format_w_repair_context(w: dict[str, Any]) -> str:
-    """Give R only the selected W definitions and their current propositions."""
+    """Give R selected W definitions and neutral repair focus, never route facts."""
     codes = tuple(w.get("w_codes") or ())
     definitions = definitions_for_codes("W", codes)
     assessments = w.get("assessments") or ()
     return (
         "<W REPAIR CONTEXT>\n"
         + (definitions or "- no content-level W diagnosis\n")
-        + "\n<CURRENT W PROPOSITIONS>\n"
+        + "\n<CURRENT W ASSESSMENTS>\n"
         + json.dumps(assessments, ensure_ascii=False)
-        + "\n</CURRENT W PROPOSITIONS>\n"
+        + "\n</CURRENT W ASSESSMENTS>\n"
         + "</W REPAIR CONTEXT>"
     )
 
@@ -154,7 +222,13 @@ class GroundingOrchestrator:
     def decide(self, evidence: str, *, trace_context: TraceContext | None = None) -> dict[str, Any]:
         """Jointly diagnose H/W, then select and realize repairs in one LLM call."""
         diagnosis_prompt = _joint_diagnosis_prompt(evidence)
-        diagnosis_raw, diagnosis_trace = _call_json(self._llm, diagnosis_prompt, 900, trace_context=trace_context, stage="grounding.h_w")
+        diagnosis_raw, diagnosis_trace = _call_json(
+            self._llm,
+            diagnosis_prompt,
+            JOINT_DIAGNOSIS_MAX_TOKENS,
+            trace_context=trace_context,
+            stage="grounding.h_w",
+        )
         diagnosis = parse_joint_diagnosis(diagnosis_raw)
         if diagnosis_trace:
             record_trace_result(diagnosis_trace, diagnosis)
@@ -166,17 +240,7 @@ class GroundingOrchestrator:
         # selection/retrieval, but an empty W diagnosis must not suppress a
         # concrete, observable H diagnosis.
         if not h or h.get("h_code") == "H7":
-            decision = self._no_repair(h, w, w_codes)
-            if (
-                h
-                and "<AGENT TRIGGER>\nfollower_trajectory_changed\n</AGENT TRIGGER>" in evidence
-                and h.get("next_guide_action") != "give_next_segment"
-            ):
-                # A correct-but-incomplete or unassessable drawing leaves the
-                # existing instruction in force; do not ask the base Guide to
-                # generate a new, potentially repeated instruction.
-                decision["suppress_base_reply"] = True
-            return decision
+            return self._no_repair(h, w, w_codes)
 
         retrieved = retrieve_repair_examples(
             evidence,
@@ -185,7 +249,13 @@ class GroundingOrchestrator:
             associated_repair_codes(h["h_code"], w_codes),
         )
         repair_prompt = _repair_prompt(evidence, h, w, retrieved)
-        repair_raw, repair_trace = _call_json(self._llm, repair_prompt, 800, trace_context=trace_context, stage="grounding.repair")
+        repair_raw, repair_trace = _call_json(
+            self._llm,
+            repair_prompt,
+            REPAIR_MAX_TOKENS,
+            trace_context=trace_context,
+            stage="grounding.repair",
+        )
         repair = parse_repair(repair_raw)
         if not repair:
             if repair_trace:
