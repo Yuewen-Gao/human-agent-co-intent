@@ -17,6 +17,15 @@ def _openai_compatible_base_url(base_url: str) -> str:
     return normalized
 
 
+def _optional_positive_int(value: Any) -> Optional[int]:
+    """Return a configured positive integer, or ``None`` for a safe fallback."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 class LLMClient(ABC):
     """Abstract base class for LLM clients"""
 
@@ -98,6 +107,40 @@ class OpenAIClient(LLMClient):
         )
         
         return response.choices[0].message.content
+
+
+class DeepSeekClient(OpenAIClient):
+    """OpenAI-compatible client with explicit DeepSeek thinking control."""
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: Optional[str] = None,
+        default_model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        joint_diagnosis_max_tokens: Optional[int] = None,
+    ):
+        super().__init__(api_key=api_key, base_url=base_url, default_model=default_model)
+        self.reasoning_effort = reasoning_effort
+        self.joint_diagnosis_max_tokens = _optional_positive_int(joint_diagnosis_max_tokens)
+
+    def chat_completions_create(
+        self,
+        messages: list,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        **kwargs,
+    ) -> str:
+        if self.reasoning_effort and "reasoning_effort" not in kwargs:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        return super().chat_completions_create(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
 
 
 class AzureOpenAIClient(LLMClient):
@@ -230,12 +273,17 @@ def create_llm_client(config: Optional[Dict[str, Any]] = None) -> Optional[LLMCl
     2. Environment variables
     
     Environment variables (for Azure OpenAI):
-    - LLM_PROVIDER: "azure", "openai", "claude", or "mock"
+    - LLM_PROVIDER: "azure", "openai", "deepseek", "claude", or "mock"
     - AZURE_OPENAI_ENDPOINT: Azure endpoint URL
     - AZURE_OPENAI_API_KEY: Azure API key
     - AZURE_OPENAI_DEPLOYMENT: Deployment name (e.g., "gpt-4o")
     - AZURE_OPENAI_API_VERSION: API version (default: "2024-12-01-preview")
     - OPENAI_API_KEY: OpenAI API key
+    - DEEPSEEK_API_KEY: DeepSeek API key
+    - DEEPSEEK_BASE_URL: DeepSeek OpenAI-compatible base URL
+    - DEEPSEEK_MODEL: DeepSeek model name
+    - DEEPSEEK_REASONING_EFFORT: one of none, low, high, or max
+    - DEEPSEEK_JOINT_DIAGNOSIS_MAX_TOKENS: optional H/W completion-token budget
     - ANTHROPIC_API_KEY: Anthropic API key
     
     Args:
@@ -298,6 +346,35 @@ def create_llm_client(config: Optional[Dict[str, Any]] = None) -> Optional[LLMCl
                 api_key=api_key,
                 base_url=base_url,
                 default_model=default_model,
+            )
+
+        elif provider == 'deepseek':
+            # DeepSeek exposes an OpenAI-compatible Chat Completions API, but
+            # keep its credentials and model selection separate from the
+            # project's OpenAI-compatible proxy profiles.
+            if config:
+                api_key = config.get('api_key')
+                base_url = config.get('base_url')
+                default_model = config.get('model')
+                reasoning_effort = config.get('reasoning_effort')
+                joint_diagnosis_max_tokens = config.get('joint_diagnosis_max_tokens')
+            else:
+                api_key = os.getenv('DEEPSEEK_API_KEY')
+                base_url = os.getenv('DEEPSEEK_BASE_URL')
+                default_model = os.getenv('DEEPSEEK_MODEL')
+                reasoning_effort = os.getenv('DEEPSEEK_REASONING_EFFORT')
+                joint_diagnosis_max_tokens = os.getenv('DEEPSEEK_JOINT_DIAGNOSIS_MAX_TOKENS')
+
+            if not api_key:
+                print('[LLMClient] Warning: DEEPSEEK_API_KEY not set. Using mock LLM.')
+                return MockLLMClient()
+
+            return DeepSeekClient(
+                api_key=api_key,
+                base_url=base_url,
+                default_model=default_model or 'deepseek-v4-pro',
+                reasoning_effort=reasoning_effort,
+                joint_diagnosis_max_tokens=_optional_positive_int(joint_diagnosis_max_tokens),
             )
         
         elif provider == 'claude':
