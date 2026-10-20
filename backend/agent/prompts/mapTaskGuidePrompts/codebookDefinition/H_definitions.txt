@@ -10,8 +10,8 @@ Operational rule: IF a current visible message explicitly asks to clarify, repea
 H2. insufficient_acceptance_evidence
 Definition: A contribution needing confirmation receives no sufficient positive evidence of understanding after a reasonable opportunity to respond.
 Use when: No acknowledgement, relevant next contribution, restatement, or task action demonstrates understanding.
-Do not use when: Ordinary silence, interface delay, or no response opportunity.
-Operational rule: IF a prior Guide contribution gave the Follower a real opportunity to show uptake AND a subsequent relevant visible contribution or action still gives no acknowledgement, relevant restatement, or task action demonstrating uptake, THEN classify H2 and route to repair. Do not classify H2 from silence, interface delay, or lack of a response opportunity.
+Do not use when: Silence before the partner has had a real opportunity to respond, interface delay, or a contribution that needs no uptake.
+Operational rule: IF a contribution of yours that needs the partner's uptake (an instruction, proposal, question, or repair) has had a real opportunity for a response, AND no later visible message or action shows acknowledgement, an accurate restatement, or a task action consistent with it, THEN classify H2. A real opportunity exists when the partner's next contribution addresses something else, or when the trigger is `partner_idle` (no visible action for the idle window since your contribution). Do not classify H2 before the idle window has passed, from interface delay, or for a contribution that needs no uptake (for example, a closing acknowledgement).
 
 H3. incompatible_public_response
 Definition: A public reply, restatement, or action demonstrates an interpretation incompatible with an earlier shared instruction, task state, or commitment.

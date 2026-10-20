@@ -1,13 +1,30 @@
 # Outcome (O)
 
+Unit of analysis: a grounding/repair episode, not a single action. An episode begins when a possible misalignment becomes visible through interaction and ends when collaborators repair it, leave it unresolved, or transform it into explicit disagreement.
+
+Boundary: misalignment means a failure of shared understanding. If both parties understand each other but prefer different strategies, priorities, or trade-offs, it is disagreement rather than misalignment. If disagreement emerges from an earlier misunderstanding, the earlier misunderstanding is the episode and the later state is its outcome.
+
+Code the status of the repair problem at episode closure. Outcome is not the repair strategy, the mental-model update relation, or overall task performance. Record closure_evidence (explicit_acknowledgement, accurate_restatement, consistent_task_action, or none_observed) as an evidence field rather than as an Outcome value. A visible correction of the shared artifact, such as a redrawn route segment, counts as consistent_task_action.
+
 O1. solution
-Definition: The repair problem is solved with positive evidence that collaborators can proceed on the repaired interpretation.
+Definition: The repair problem receives a solution, supported by sufficient positive evidence that collaborators can proceed on the repaired interpretation.
+Use when: A repaired interpretation is accepted, accurately restated, or followed by a task action consistent with it.
+Do not use when: A candidate explanation is only presented, or clarification is requested, without later evidence of understanding; use O4 or O2 as appropriate.
+Example: The follower says "okay, left of the volcano" and draws the corresponding route.
 
 O2. abandonment
-Definition: The repair problem remains unsolved as interaction moves on, changes topic, or explicitly ends the attempt.
+Definition: The repair problem is left without a solution as interaction moves on, changes topic, or explicitly terminates the attempt.
+Use when: There is evidence that the issue remains unresolved and the collaborators discontinue the repair.
+Do not use when: The record simply ends before there is enough evidence to determine what happened; use O4.
+Example: The agent asks which document version to use, but the participant changes topic and the version is never established.
 
 O3. explicit_disagreement
-Definition: Collaborators understand each other's positions but retain different preferences, priorities, or decisions.
+Definition: Collaborators make their differing positions explicit and demonstrate sufficient understanding of each other's position, but retain different preferences, priorities, or decisions.
+Use when: The episode has moved from a misunderstanding into an acknowledged difference of view.
+Do not use when: The positions differ because one collaborator still misunderstands the other; continue to code the underlying misalignment and use O1, O2, or O4.
+Example: Both collaborators understand the evidence limitation, but one prioritizes concision and the other retains the full limitation.
 
 O4. not_observable
-Definition: The available record lacks sufficient evidence to classify solution, abandonment, or explicit disagreement.
+Definition: The available record does not provide sufficient evidence to classify the repair problem as solution, abandonment, or explicit disagreement.
+Use when: The episode ends after a question, repair attempt, or tentative proposal without a visible response, acceptance, task action, or discontinuation.
+Example: The agent requests clarification, but the recording ends before the participant replies.
