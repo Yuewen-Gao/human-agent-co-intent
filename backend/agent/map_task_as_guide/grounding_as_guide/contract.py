@@ -108,8 +108,12 @@ def parse_joint_diagnosis(raw: str) -> dict[str, Any]:
     return {"h": h, "w": w}
 
 
-def parse_repair(raw: str) -> dict[str, Any]:
-    """Validate R metadata plus its Map Task action-envelope reply."""
+def parse_repair(raw: str, *, allow_r7: bool = False) -> dict[str, Any]:
+    """Validate R metadata plus its Map Task action-envelope reply.
+
+    R7 (acceptance check) is accepted only when the caller allows it, i.e. when
+    the target item already has a repair to check.
+    """
     value = parse_json_object(raw)
     raw_actions = value.get("actions")
     if raw_actions is not None:
@@ -143,7 +147,7 @@ def parse_repair(raw: str) -> dict[str, Any]:
             if (
                 not isinstance(code, str)
                 or code not in VALID_R_CODES
-                or code == "R7"
+                or (code == "R7" and not allow_r7)
                 or code in used_codes
                 or not evidence
             ):
@@ -163,7 +167,7 @@ def parse_repair(raw: str) -> dict[str, Any]:
         if isinstance(raw_codes, list):
             codes = tuple(dict.fromkeys(
                 code for code in raw_codes
-                if isinstance(code, str) and code in VALID_R_CODES and code != "R7"
+                if isinstance(code, str) and code in VALID_R_CODES and (code != "R7" or allow_r7)
             ))
         else:
             code = value.get("r_code")
@@ -181,4 +185,90 @@ def parse_repair(raw: str) -> dict[str, Any]:
         "reply": reply,
         "adds_missing_detail": str(value.get("adds_missing_detail", "false")).lower() == "true",
         "selection_evidence": str(value.get("selection_evidence", "")).strip(),
+    }
+
+
+VALID_OUTCOME_CODES = frozenset({"O1", "O2", "O3", "O4"})
+VALID_CLOSURE_EVIDENCE = frozenset({
+    "explicit_acknowledgement", "accurate_restatement", "consistent_task_action", "none_observed",
+})
+VALID_DETECTION_ACTIONS = frozenset({"merge", "new", "none"})
+
+
+def parse_reconciliation(raw: str, open_item_ids: frozenset[str] | set[str]) -> dict[str, Any]:
+    """Validate the item-maintenance response against the currently open items.
+
+    Unknown ids, invalid codes, and missing entries are dropped item by item;
+    an omitted item simply receives no outcome this turn.
+    """
+    value = parse_json_object(raw)
+    raw_items = value.get("items")
+    outcomes: dict[str, dict[str, str]] = {}
+    if isinstance(raw_items, list):
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                continue
+            item_id = raw_item.get("id")
+            outcome = raw_item.get("outcome")
+            closure = raw_item.get("closure_evidence")
+            if (
+                isinstance(item_id, str) and item_id in open_item_ids and item_id not in outcomes
+                and outcome in VALID_OUTCOME_CODES
+                and closure in VALID_CLOSURE_EVIDENCE
+            ):
+                outcomes[item_id] = {
+                    "outcome": outcome,
+                    "closure_evidence": closure,
+                    "evidence": str(raw_item.get("evidence", "")).strip(),
+                }
+    raw_detection = value.get("detection")
+    raw_detection = raw_detection if isinstance(raw_detection, dict) else {}
+    action = raw_detection.get("action")
+    item_id = str(raw_detection.get("item_id") or "").strip()
+    proposition = str(raw_detection.get("proposition") or "").strip()
+    if action not in VALID_DETECTION_ACTIONS or (action == "merge" and item_id not in open_item_ids):
+        detection = {}
+    else:
+        detection = {
+            "action": action,
+            "item_id": item_id if action == "merge" else "",
+            "proposition": proposition if action == "new" else "",
+        }
+    return {"outcomes": outcomes, "detection": detection}
+
+
+VALID_PROGRESS = frozenset({"in_progress", "no_evidence", "not_applicable"})
+VALID_STATES = frozenset({"no_issue", "specific_correctable", "missing_information", "instruction_invalidated"})
+
+
+def parse_decision(raw: str, open_item_ids: frozenset[str] | set[str], acts_vocabulary: tuple[str, ...]) -> dict[str, Any]:
+    """Validate the combined item-upkeep and act-selection response.
+
+    Item outcomes and merge/new reuse `parse_reconciliation`. The act part is
+    exclusive: either no_message (no acts) or at least one known act.
+    """
+    value = parse_json_object(raw)
+    upkeep = parse_reconciliation(raw, open_item_ids)
+    for entry in value.get("items") or []:
+        if isinstance(entry, dict) and entry.get("id") in upkeep["outcomes"]:
+            progress = entry.get("progress")
+            upkeep["outcomes"][entry["id"]]["progress"] = progress if progress in VALID_PROGRESS else ""
+    raw_acts = [a for a in value.get("acts") or [] if isinstance(a, dict) and a.get("act") in acts_vocabulary]
+    acts = [a["act"] for a in raw_acts]
+    targets = [str(a.get("target_item_id") or "").strip() for a in raw_acts]
+    targets = [t if t in open_item_ids else "" for t in targets]
+    no_message = value.get("no_message") is True
+    primary = value.get("primary_act") if value.get("primary_act") in acts else (acts[0] if acts else None)
+    reason = str(value.get("reason") or "").strip() or "; ".join(
+        str(a.get("evidence", "")).strip() for a in raw_acts if str(a.get("evidence", "")).strip())
+    valid = (no_message and not acts) or (not no_message and bool(acts))
+    return {
+        **upkeep,
+        "valid": valid,
+        "no_message": no_message and not acts,
+        "acts": acts if valid and not no_message else [],
+        "targets": targets if valid and not no_message else [],
+        "primary_act": primary if valid and not no_message else None,
+        "state": value.get("state") if value.get("state") in VALID_STATES else None,
+        "reason": reason,
     }

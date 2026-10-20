@@ -36,6 +36,7 @@ from agent.map_task_as_guide.grounding_as_guide.mental_model_update import (
 from agent.map_task_as_guide.grounding_as_guide.orchestrator import (
     GroundingOrchestrator,
     parse_follower_action_decision,
+    record_repair_attempt,
     safe_decide,
 )
 from services.mental_model_service import (
@@ -312,7 +313,12 @@ class AgentRunner:
             # c2 Map Task Guide: use the two-stage grounding pipeline only when
             # the existing Awareness Dashboard exposes follower map progress.
             if self._uses_awareness_grounding_pipeline(participant, session):
-                decision = safe_decide(GroundingOrchestrator(self.llm_client), prompt, trace_context=trace_context)
+                decision = safe_decide(
+                    GroundingOrchestrator(self.llm_client),
+                    prompt,
+                    session=session,
+                    trace_context=trace_context,
+                )
                 if decision is None:
                     print('[AgentRunner] Grounding pipeline unavailable; using normal Guide reply path')
                 else:
@@ -326,6 +332,10 @@ class AgentRunner:
                             'type': 'send_map_guidance',
                             'content': reply,
                         }])
+                        if results.get('successful'):
+                            record_repair_attempt(
+                                session, decision.get('misalignment_item_id'), decision.get('r_codes'), reply,
+                            )
                         repair_completion = decision.get('_trace_repair_completion')
                         if repair_completion:
                             record_trace_result(
@@ -336,6 +346,10 @@ class AgentRunner:
                         self._record_guide_turn(session, session_key, prompt, results, trace_context=trace_context)
                         print(f"[AgentRunner] grounding pipeline sent {len(results.get('successful', []))} guidance action(s)")
                         return
+                    if decision.get('act_block'):
+                        # The grounding decision chose a non-repair act; the
+                        # normal Guide reply realizes it.
+                        prompt += '\n' + decision['act_block']
                     if decision.get('normal_guide_action') == 'give_next_segment':
                         prompt += (
                             '\n<GROUNDING HANDOFF>\n'
