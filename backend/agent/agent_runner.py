@@ -36,6 +36,7 @@ from agent.map_task_as_guide.grounding_as_guide.mental_model_update import (
 from agent.map_task_as_guide.grounding_as_guide.orchestrator import (
     GroundingOrchestrator,
     parse_follower_action_decision,
+    record_guide_message,
     record_repair_attempt,
     safe_decide,
 )
@@ -312,6 +313,7 @@ class AgentRunner:
 
             # c2 Map Task Guide: use the two-stage grounding pipeline only when
             # the existing Awareness Dashboard exposes follower map progress.
+            selected_acts: list = []
             if self._uses_awareness_grounding_pipeline(participant, session):
                 decision = safe_decide(
                     GroundingOrchestrator(self.llm_client),
@@ -336,6 +338,7 @@ class AgentRunner:
                             record_repair_attempt(
                                 session, decision.get('misalignment_item_id'), decision.get('r_codes'), reply,
                             )
+                            record_guide_message(session, decision.get('selected_acts'), reply)
                         repair_completion = decision.get('_trace_repair_completion')
                         if repair_completion:
                             record_trace_result(
@@ -346,6 +349,7 @@ class AgentRunner:
                         self._record_guide_turn(session, session_key, prompt, results, trace_context=trace_context)
                         print(f"[AgentRunner] grounding pipeline sent {len(results.get('successful', []))} guidance action(s)")
                         return
+                    selected_acts = list(decision.get('selected_acts') or [])
                     if decision.get('act_block'):
                         # The grounding decision chose a non-repair act; the
                         # normal Guide reply realizes it.
@@ -407,6 +411,12 @@ class AgentRunner:
             if action_completion:
                 record_trace_result(action_completion, {"actions": actions}, execution_result=results)
             if self.experiment_type == 'maptask' and str(participant.get('role') or '').lower() == 'guide':
+                sent = ' / '.join(
+                    str((item.get('action') or {}).get('content') or '').strip()
+                    for item in results.get('successful') or []
+                    if isinstance(item, dict) and (item.get('action') or {}).get('type') == 'send_map_guidance'
+                )
+                record_guide_message(session, selected_acts, sent)
                 self._record_guide_turn(session, session_key, prompt, results, trace_context=trace_context)
             
             # After actions are executed, re-fetch participant to get updated state (including read_essays)

@@ -287,6 +287,59 @@ def record_repair_attempt(
     return _update_item(session, item_id, lambda item: item["repair_attempts"].append(attempt)) is not None
 
 
+_LAST_GUIDE_MESSAGE_KEY = "grounding_last_guide_message"
+
+
+def record_guide_message(session: dict[str, Any], acts: Any, reply: str) -> bool:
+    """Remember the Guide's last sent message, its act(s), and the trace at that moment.
+
+    The next decision uses it to see what the Guide just asked for and what the
+    Follower has drawn since, independent of any misalignment item.
+    """
+    if not str(reply or "").strip():
+        return False
+    grid = follower_trajectory_grid_text(session)
+    session[_LAST_GUIDE_MESSAGE_KEY] = {
+        "timestamp": _now(),
+        "acts": [a for a in (acts or []) if isinstance(a, str)],
+        "reply": str(reply).strip(),
+        "trajectory_grid": grid.strip() if _trajectory_cells(grid) is not None else "",
+    }
+    return True
+
+
+def _cell_changes(before_grid: str, current_grid: str | None) -> str:
+    before, after = _trajectory_cells(before_grid or ""), _trajectory_cells(current_grid or "")
+    if before is None or after is None:
+        return "not available"
+    added = [list(cell) for cell in sorted(after - before)]
+    removed = [list(cell) for cell in sorted(before - after)]
+    if not added and not removed:
+        return "none (no drawing change since this message)"
+    return f"added_cells: {json.dumps(added)}; removed_cells: {json.dumps(removed)}"
+
+
+def _previous_guide_turn(session: dict[str, Any], current_grid: str | None) -> str:
+    last = session.get(_LAST_GUIDE_MESSAGE_KEY)
+    if not isinstance(last, dict) or not last.get("reply"):
+        return "- none"
+    acts = "+".join(last.get("acts") or []) or "unknown"
+    return (f'- acts: {acts}\n- message: "{last["reply"]}"\n'
+            f"- Follower trajectory changes since this message: {_cell_changes(last.get('trajectory_grid', ''), current_grid)}")
+
+
+def _recently_closed_items(session: dict[str, Any], limit: int = 2) -> str:
+    closed = [item for item in load_misalignment_history(session) if item["status"] == "Resolved"][-limit:]
+    if not closed:
+        return "- none"
+    lines = []
+    for item in closed:
+        last = next((e for e in reversed(item["evidence_log"]) if e.get("kind") == "outcome"), {})
+        lines.append(f"- {item['id']} | {item['description']} | closed as {item.get('outcome')}: "
+                     f"{str(last.get('evidence', ''))[:160]}")
+    return "\n".join(lines)
+
+
 def _trajectory_since_last_repair(item: dict[str, Any], current_grid: str | None) -> str:
     attempts = item["repair_attempts"]
     if not attempts:
@@ -466,6 +519,7 @@ def _decide_prompt(
     h: dict[str, Any],
     w: dict[str, Any],
     current_trajectory_grid: str | None = None,
+    session: dict[str, Any] | None = None,
 ) -> str:
     """Build the combined item-upkeep and act-selection request.
 
@@ -487,7 +541,11 @@ def _decide_prompt(
         + definitions_for("O")
         + "\n</O CODEBOOK>\n\n<UNRESOLVED MISALIGNMENT ITEMS>\n"
         + (_format_open_items(open_items, current_trajectory_grid) if open_items else "- none")
-        + "\n</UNRESOLVED MISALIGNMENT ITEMS>\n\n<CURRENT DETECTION>\n"
+        + "\n</UNRESOLVED MISALIGNMENT ITEMS>\n\n<RECENTLY CLOSED ITEMS>\n"
+        + _recently_closed_items(session or {})
+        + "\n</RECENTLY CLOSED ITEMS>\n\n<PREVIOUS GUIDE TURN>\n"
+        + _previous_guide_turn(session or {}, current_trajectory_grid)
+        + "\n</PREVIOUS GUIDE TURN>\n\n<CURRENT DETECTION>\n"
         + json.dumps(detection, ensure_ascii=False)
         + "\n</CURRENT DETECTION>\n\n<CURRENT OBSERVABLE EVIDENCE>\n"
         + (observable_evidence or evidence)
@@ -685,7 +743,7 @@ class GroundingOrchestrator:
         try:
             raw, trace = _call_json(
                 self._llm,
-                _decide_prompt(evidence, open_items, h, w, follower_trajectory_grid_text(session)),
+                _decide_prompt(evidence, open_items, h, w, follower_trajectory_grid_text(session), session),
                 _joint_diagnosis_max_tokens(self._llm),
                 trace_context=trace_context,
                 stage="grounding.decide",
