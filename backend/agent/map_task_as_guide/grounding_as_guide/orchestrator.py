@@ -263,6 +263,18 @@ def close_misalignment_item(
     return bool(target and _update_item(session, item_id, update))
 
 
+def reopen_misalignment_item(session: dict[str, Any], item_id: str) -> dict[str, Any] | None:
+    """Reopen a closed episode the same problem came back to; its repairs stay counted."""
+
+    def update(item: dict[str, Any]) -> None:
+        item["evidence_log"].append({"timestamp": _now(), "kind": "reopened", "previous_outcome": item.get("outcome")})
+        item["status"] = "Unresolved"
+        item["outcome"] = None
+
+    target = next((item for item in load_misalignment_history(session) if item["id"] == item_id), None)
+    return _update_item(session, item_id, update) if target and target["status"] == "Resolved" else None
+
+
 def note_misalignment_evidence(session: dict[str, Any], item_id: str, outcome: dict[str, str]) -> None:
     """Log a not-yet-closing (O4) assessment without changing status."""
     _update_item(session, item_id, lambda item: item["evidence_log"].append({
@@ -329,15 +341,20 @@ def _previous_guide_turn(session: dict[str, Any], current_grid: str | None) -> s
             f"- Follower trajectory changes since this message: {_cell_changes(last.get('trajectory_grid', ''), current_grid)}")
 
 
-def _recently_closed_items(session: dict[str, Any], limit: int = 2) -> str:
-    closed = [item for item in load_misalignment_history(session) if item["status"] == "Resolved"][-limit:]
+def _recently_closed(session: dict[str, Any], limit: int = 2) -> list[dict[str, Any]]:
+    """The closed items the decision sees, and so the only ones it may reopen."""
+    return [item for item in load_misalignment_history(session) if item["status"] == "Resolved"][-limit:]
+
+
+def _recently_closed_items(session: dict[str, Any]) -> str:
+    closed = _recently_closed(session)
     if not closed:
         return "- none"
     lines = []
     for item in closed:
         last = next((e for e in reversed(item["evidence_log"]) if e.get("kind") == "outcome"), {})
-        lines.append(f"- {item['id']} | {item['description']} | closed as {item.get('outcome')}: "
-                     f"{str(last.get('evidence', ''))[:160]}")
+        lines.append(f"- {item['id']} | {item['description']} | repairs sent: {len(item['repair_attempts'])}"
+                     f" | closed as {item.get('outcome')}: {str(last.get('evidence', ''))[:160]}")
     return "\n".join(lines)
 
 
@@ -378,6 +395,8 @@ def _recent_judgements(item: dict[str, Any], limit: int = 4) -> str:
         elif kind == "outcome":
             parts.append(f"outcome {entry.get('outcome')} {entry.get('progress', '')}".rstrip()
                          + f": {str(entry.get('evidence', ''))[:160]}")
+        elif kind == "reopened":
+            parts.append(f"reopened after {entry.get('previous_outcome')}: the same problem came back")
         elif kind == "act":
             parts.append(f"act {'+'.join(entry.get('acts') or [])}")
     return " | ".join(parts)
@@ -562,12 +581,12 @@ _DECISION_CONTRACT = (
     '{"items":[{"id":"open item id","outcome":"O1|O2|O3|O4","progress":"in_progress|no_evidence|not_applicable",'
     '"closure_evidence":"explicit_acknowledgement|accurate_restatement|consistent_task_action|none_observed",'
     '"evidence":"short observable reason"}],'
-    '"detection":{"action":"merge|new|none","item_id":"open item id for merge, otherwise empty",'
+    '"detection":{"action":"merge|new|none","item_id":"open or recently closed item id for merge, otherwise empty",'
     '"proposition":"short disputed proposition for new, otherwise empty"},'
     '"state":"no_issue|specific_correctable|missing_information|instruction_invalidated",'
     '"no_message":false,"reason":"short reason",'
     '"acts":[{"act":"Initiate|Continue|Acknowledge|Repair|Request Repair|Request Acknowledge|Cancel",'
-    '"target_item_id":"open item id or empty","evidence":"short observable reason"}],"primary_act":"one of the acts"}\n'
+    '"target_item_id":"open or reopened item id, or empty","evidence":"short observable reason"}],"primary_act":"one of the acts"}\n'
     'When no_message is true, acts must be empty. Return exactly one entry per open item.'
 )
 
@@ -747,6 +766,7 @@ class GroundingOrchestrator:
         detected = h.get("h_code") in _DETECTED_MISALIGNMENT_CODES
         open_items = unresolved_misalignment_queue(session)
         open_ids = frozenset(item["id"] for item in open_items)
+        closed_ids = frozenset(item["id"] for item in _recently_closed(session))
         try:
             raw, trace = _call_json(
                 self._llm,
@@ -755,7 +775,7 @@ class GroundingOrchestrator:
                 trace_context=trace_context,
                 stage="grounding.decide",
             )
-            result = parse_decision(raw, open_ids, grounding_acts.ACTS)
+            result = parse_decision(raw, open_ids, grounding_acts.ACTS, closed_ids)
             if trace:
                 record_trace_result(trace, result)
         except Exception as error:  # Upkeep and act choice must never drop the turn.
@@ -774,6 +794,10 @@ class GroundingOrchestrator:
         if detected:
             detection = result["detection"]
             still_open = {item["id"] for item in unresolved_misalignment_queue(session)}
+            if detection.get("action") == "merge" and detection["item_id"] in closed_ids:
+                # The same problem came back after its item was closed: continue that episode.
+                reopen_misalignment_item(session, detection["item_id"])
+                still_open.add(detection["item_id"])
             if detection.get("action") == "merge" and detection["item_id"] in still_open:
                 merge_misalignment_detection(session, detection["item_id"], h, w)
                 result["item_id"] = detection["item_id"]

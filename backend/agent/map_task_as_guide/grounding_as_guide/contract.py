@@ -195,11 +195,14 @@ VALID_CLOSURE_EVIDENCE = frozenset({
 VALID_DETECTION_ACTIONS = frozenset({"merge", "new", "none"})
 
 
-def parse_reconciliation(raw: str, open_item_ids: frozenset[str] | set[str]) -> dict[str, Any]:
+def parse_reconciliation(
+    raw: str, open_item_ids: frozenset[str] | set[str], closed_item_ids: frozenset[str] | set[str] = frozenset()
+) -> dict[str, Any]:
     """Validate the item-maintenance response against the currently open items.
 
     Unknown ids, invalid codes, and missing entries are dropped item by item;
-    an omitted item simply receives no outcome this turn.
+    an omitted item simply receives no outcome this turn. A detection may also
+    merge into one of ``closed_item_ids`` (recently closed items it reopens).
     """
     value = parse_json_object(raw)
     raw_items = value.get("items")
@@ -226,7 +229,8 @@ def parse_reconciliation(raw: str, open_item_ids: frozenset[str] | set[str]) -> 
     action = raw_detection.get("action")
     item_id = str(raw_detection.get("item_id") or "").strip()
     proposition = str(raw_detection.get("proposition") or "").strip()
-    if action not in VALID_DETECTION_ACTIONS or (action == "merge" and item_id not in open_item_ids):
+    mergeable = set(open_item_ids) | set(closed_item_ids)
+    if action not in VALID_DETECTION_ACTIONS or (action == "merge" and item_id not in mergeable):
         detection = {}
     else:
         detection = {
@@ -241,14 +245,20 @@ VALID_PROGRESS = frozenset({"in_progress", "no_evidence", "not_applicable"})
 VALID_STATES = frozenset({"no_issue", "specific_correctable", "missing_information", "instruction_invalidated"})
 
 
-def parse_decision(raw: str, open_item_ids: frozenset[str] | set[str], acts_vocabulary: tuple[str, ...]) -> dict[str, Any]:
+def parse_decision(
+    raw: str,
+    open_item_ids: frozenset[str] | set[str],
+    acts_vocabulary: tuple[str, ...],
+    closed_item_ids: frozenset[str] | set[str] = frozenset(),
+) -> dict[str, Any]:
     """Validate the combined item-upkeep and act-selection response.
 
     Item outcomes and merge/new reuse `parse_reconciliation`. The act part is
-    exclusive: either no_message (no acts) or at least one known act.
+    exclusive: either no_message (no acts) or at least one known act. An act
+    may target a closed item only when this turn's detection reopens it.
     """
     value = parse_json_object(raw)
-    upkeep = parse_reconciliation(raw, open_item_ids)
+    upkeep = parse_reconciliation(raw, open_item_ids, closed_item_ids)
     for entry in value.get("items") or []:
         if isinstance(entry, dict) and entry.get("id") in upkeep["outcomes"]:
             progress = entry.get("progress")
@@ -256,7 +266,8 @@ def parse_decision(raw: str, open_item_ids: frozenset[str] | set[str], acts_voca
     raw_acts = [a for a in value.get("acts") or [] if isinstance(a, dict) and a.get("act") in acts_vocabulary]
     acts = [a["act"] for a in raw_acts]
     targets = [str(a.get("target_item_id") or "").strip() for a in raw_acts]
-    targets = [t if t in open_item_ids else "" for t in targets]
+    targetable = set(open_item_ids) | {upkeep["detection"].get("item_id") or ""} - {""}
+    targets = [t if t in targetable else "" for t in targets]
     no_message = value.get("no_message") is True
     primary = value.get("primary_act") if value.get("primary_act") in acts else (acts[0] if acts else None)
     reason = str(value.get("reason") or "").strip() or "; ".join(

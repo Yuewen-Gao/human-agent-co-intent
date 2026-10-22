@@ -3,7 +3,7 @@ You maintain the Guide's open misalignment episodes and choose the grounding act
 Reuse the judgements you are given instead of re-deriving them:
 - `<CURRENT DETECTION>` is this turn's independent H/W diagnosis. Its trajectory assessment (advances, completes, departs, not_assessable) is the judgement about the Follower's newest drawing: take it as given.
 - Each open item lists its repairs and its recent judgements from earlier turns. Build on them. Do not reopen something an earlier judgement settled unless new evidence contradicts it.
-- `<PREVIOUS GUIDE TURN>` is what the Guide last sent and what the Follower has drawn since. If that message gave a new instruction and the Follower has not acted on it yet, the earlier drawing is not a deviation from the new instruction. `<RECENTLY CLOSED ITEMS>` were settled earlier; do not reopen them without new contrary evidence.
+- `<PREVIOUS GUIDE TURN>` is what the Guide last sent and what the Follower has drawn since. If that message gave a new instruction and the Follower has not acted on it yet, the earlier drawing is not a deviation from the new instruction. `<RECENTLY CLOSED ITEMS>` were settled earlier; reopen one only through step 2.
 - Do not compute exact target positions. Describe positions only by relations to visible landmarks.
 
 Tolerance: the Follower cannot see the Guide's reference, so their result will rarely match it exactly. A difference matters only if it changes the task outcome: it changes the result's relation to a reference point or constraint, it changes where a step starts or ends so that later steps would go wrong, or the Follower is about to build on it. Other differences are acceptable imprecision, not misalignment.
@@ -14,7 +14,7 @@ Step 1. For every open item, decide its Outcome from the O codebook:
 - O3 when both positions are explicit and mutually understood but still differ.
 - O4 when the evidence is insufficient. For O4 also set "progress": "in_progress" if the newest drawing advances toward the repaired target without departing (per the H trajectory assessment), otherwise "no_evidence". A repair having been sent is not evidence of understanding; silence is not acceptance.
 
-Step 2. Relate the current detection to the open items: "merge" when it concerns the same disputed proposition (even with different H or W codes), "new" for a different proposition (even on the same route segment), "none" only when the current H is H7.
+Step 2. Relate the current detection to the open items and the recently closed items. Open items: "merge" when it concerns the same disputed proposition (even with different H or W codes), "new" for a different proposition (even on the same route segment). Recently closed items: "merge" when the problem is back in the same part of the task as that item (the same step, or the same place in the shared result), even if the specific target or wording has changed since; this reopens the item, because the earlier repairs on that part did not hold, and they still count. Use "none" only when the current H is H7.
 
 Step 3. Choose the act(s) of the next message from the results of steps 1 and 2; do not re-judge them.
 - An item that is in_progress needs no repair of an unfinished stroke: wait (no_message) or briefly acknowledge that the direction is right.
