@@ -28,10 +28,6 @@ from agent.llm_client import create_llm_client, LLMClient
 from agent.map_task_as_guide.agent_session_context import (
     append_maptask_grid_context,
     append_session_conversation_memory,
-    follower_trajectory_grid_text,
-)
-from agent.map_task_as_guide.grounding_as_guide.mental_model_update import (
-    append_mental_model_reply_context,
 )
 from agent.map_task_as_guide.grounding_as_guide.grounding_images import map_image_parts, user_content as grounding_user_content
 from agent.map_task_as_guide.grounding_as_guide.orchestrator import (
@@ -41,19 +37,6 @@ from agent.map_task_as_guide.grounding_as_guide.orchestrator import (
     record_repair_attempt,
     safe_decide,
 )
-from services.mental_model_service import (
-    append_agent_turn_record,
-    apply_internal_agent_mental_model_patch,
-    claim_next_smm_recording_job,
-    ensure_complete_mental_model,
-    enqueue_smm_recording_job,
-    finish_smm_recording_job,
-    public_mental_model,
-    resume_smm_recording_jobs,
-    should_publish_mental_model_update,
-    write_agent_annotation_timeline_file,
-)
-from agent.map_task_as_guide.grounding_as_guide.smm_recorder import assess as assess_smm
 from agent.map_task_as_follower.context import latest_visible_human_guide_message_context
 from services.agent_reply_status import (
     emit_agent_reply_status,
@@ -101,8 +84,6 @@ class AgentRunner:
         self.is_running = False
         self.perception_thread = None
         self._perception_call_lock = threading.Lock()
-        self._smm_worker_lock = threading.Lock()
-        self._smm_worker_thread = None
         self._message_trigger_lock = threading.Lock()
         self._message_trigger_timer = None
         self._handled_event_keys: set[str] = set()
@@ -117,8 +98,6 @@ class AgentRunner:
             return
         
         self.is_running = True
-        if (self.experiment_type or '').lower() == 'maptask':
-            self._resume_smm_recording_worker()
         
         # For hiddenprofile experiment, check if initial vote is needed before starting perception loop
         if self.experiment_type == 'hiddenprofile':
@@ -348,7 +327,7 @@ class AgentRunner:
                                 {key: value for key, value in decision.items() if not key.startswith('_trace_')},
                                 execution_result=results,
                             )
-                        self._record_guide_turn(session, session_key, prompt, results, trace_context=trace_context)
+                        session_module.commit_session(session_key, session)
                         print(f"[AgentRunner] grounding pipeline sent {len(results.get('successful', []))} guidance action(s)")
                         return
                     selected_acts = list(decision.get('selected_acts') or [])
@@ -403,8 +382,6 @@ class AgentRunner:
                 if is_maptask_follower
                 else self._parse_response(response)
             )
-            # Map Task SMM updates are produced by the independent post-reply
-            # recorder, never by the reply agent's JSON payload.
             
             if not actions:
                 if action_completion:
@@ -423,7 +400,7 @@ class AgentRunner:
                     if isinstance(item, dict) and (item.get('action') or {}).get('type') == 'send_map_guidance'
                 )
                 record_guide_message(session, selected_acts, sent)
-                self._record_guide_turn(session, session_key, prompt, results, trace_context=trace_context)
+                session_module.commit_session(session_key, session)
             
             # After actions are executed, re-fetch participant to get updated state (including read_essays)
             # This ensures the next perception cycle has the latest data
@@ -488,102 +465,6 @@ class AgentRunner:
             self._message_trigger_timer = threading.Timer(debounce_seconds, run_triggered_perception)
             self._message_trigger_timer.daemon = True
             self._message_trigger_timer.start()
-
-    def _record_guide_turn(self, session: Dict[str, Any], session_key: str, prompt: str, results: Dict[str, Any], *, trace_context: TraceContext | None = None) -> None:
-        """Persist SMM jobs immediately; recording itself runs outside the reply lock."""
-        guidance_actions = [
-            item for item in (results.get('successful') or [])
-            if isinstance(item, dict) and (item.get('action') or {}).get('type') == 'send_map_guidance'
-        ]
-        neutral_evidence = prompt.split('<EXPLICIT_WORKING_INTERPRETATION>', 1)[0]
-        for action in guidance_actions:
-            source_action = action.get('action') or {}
-            reply = str(source_action.get('content') or '').strip()
-            action_id = action.get('action_id')
-            enqueue_smm_recording_job(
-                session,
-                agent_participant_id=self.participant_id,
-                action_id=action_id,
-                message_id=action.get('message_id'),
-                evidence=neutral_evidence,
-                reply=reply,
-                trajectory_grid_at_reply=follower_trajectory_grid_text(session),
-                trace_origin={
-                    'session_id': trace_context.session_id,
-                    'participant_id': trace_context.participant_id,
-                    'turn_id': trace_context.turn_id,
-                    'trigger_context': trace_context.trigger_context,
-                } if trace_context else None,
-            )
-        session_module.commit_session(session_key, session)
-        self._start_smm_recording_worker()
-
-    def _resume_smm_recording_worker(self) -> None:
-        session_key, session = find_session_by_identifier(self.session_id)
-        if not session:
-            return
-        if resume_smm_recording_jobs(session, self.participant_id):
-            session_module.commit_session(session_key, session)
-        self._start_smm_recording_worker()
-
-    def _start_smm_recording_worker(self) -> None:
-        with self._smm_worker_lock:
-            if self._smm_worker_thread and self._smm_worker_thread.is_alive():
-                return
-            self._smm_worker_thread = threading.Thread(
-                target=self._run_smm_recording_worker,
-                daemon=True,
-                name=f'smm-recorder-{self.session_id}-{self.participant_id}',
-            )
-            self._smm_worker_thread.start()
-
-    def _run_smm_recording_worker(self) -> None:
-        while True:
-            session_key, session = find_session_by_identifier(self.session_id)
-            if not session:
-                return
-            job = claim_next_smm_recording_job(session, self.participant_id)
-            if not job:
-                return
-            session_module.commit_session(session_key, session)
-            self._record_one_smm_job(session, session_key, job)
-
-    def _record_one_smm_job(self, session: Dict[str, Any], session_key: str, job: Dict[str, Any]) -> None:
-        model = ensure_complete_mental_model(session)
-        recording_errors = [] if isinstance(job.get('action_id'), str) else ['action_log_missing']
-        origin = job.get('trace_origin') if isinstance(job.get('trace_origin'), dict) else {}
-        smm_trace_context = TraceContext(
-            session_id=str(origin.get('session_id') or session.get('session_id') or self.session_id),
-            participant_id=str(origin.get('participant_id') or self.participant_id),
-            turn_id=str(origin.get('turn_id') or uuid.uuid4()),
-            stage='smm.update',
-            trigger_context=str(origin.get('trigger_context') or 'smm_recording'),
-        )
-        try:
-            assessment = assess_smm(
-                self.llm_client, job.get('evidence', ''), model, job.get('reply', ''), session_id=session_key,
-                trace_context=smm_trace_context,
-            ) if self.llm_client else {'base_revision': model.get('revision', 0), 'changes': {}, 'annotation': {}, 'valid': True}
-            if not assessment.get('valid', True):
-                recording_errors.append('smm_recorder_invalid_output')
-        except Exception as error:
-            print(f'[AgentRunner] SMM recorder failed: {error}')
-            assessment = {'base_revision': model.get('revision', 0), 'changes': {}, 'annotation': {}}
-            recording_errors.append('smm_recorder_failed')
-        update_result = apply_internal_agent_mental_model_patch(session, assessment)
-        record = append_agent_turn_record(
-            session, action_id=job.get('action_id'), message_id=job.get('message_id'),
-            annotation=assessment.get('annotation'), agent_participant_id=self.participant_id,
-            trajectory_grid_at_reply=job.get('trajectory_grid_at_reply'), recording_errors=recording_errors,
-        )
-        record.update({'action_timestamp': datetime.now(timezone.utc).isoformat(), 'action_type': 'send_map_guidance', 'action_content': job.get('reply', '')})
-        finish_smm_recording_job(job, error=','.join(recording_errors) or None)
-        write_agent_annotation_timeline_file(session, session_key)
-        session_module.commit_session(session_key, session)
-        if should_publish_mental_model_update(bool(update_result.get('changed'))):
-            from websocket.handlers import get_socketio
-            room = session.get('session_id') or session_key
-            get_socketio().emit('mental_model_updated', {'session_id': room, 'mental_model': public_mental_model(session)}, room=room)
 
     def _uses_awareness_grounding_pipeline(self, participant: Dict[str, Any], session: Dict[str, Any]) -> bool:
         if not grounding_treatment_enabled():
@@ -1274,10 +1155,7 @@ Response:"""
             prompt, self.participant_id, session
         )
         if self.experiment_type == 'maptask':
-            prompt = append_maptask_grid_context(
-                prompt, participant, session, agent_participant_id=self.participant_id
-            )
-            prompt = append_mental_model_reply_context(prompt, session.get('mental_model'))
+            prompt = append_maptask_grid_context(prompt, participant, session)
         
         return prompt
     

@@ -461,7 +461,6 @@ const showMaptaskSubmitModal = ref(false)
 const maptaskSubmitSelfConfirmed = ref(false)
 const maptaskSubmitWaitingPartner = ref(false)
 const maptaskSubmitSubmitting = ref(false)
-const groundingTreatmentEnabled = ref(false)
 
 function syncMaptaskSessionFlags(session) {
   if (!session || typeof session !== 'object') return
@@ -476,9 +475,6 @@ function syncMaptaskSessionFlags(session) {
     } else {
       maptaskSubmitSelfConfirmed.value = false
     }
-  }
-  if ('feature_flags' in session) {
-    groundingTreatmentEnabled.value = session.feature_flags?.grounding_treatment_enabled === true
   }
 }
 
@@ -2317,7 +2313,6 @@ onUnmounted(() => {
           :message-length-limit="messageLengthLimit"
           :communication-media="communicationMedia"
           :type-indicator-enabled="typeIndicatorEnabled"
-          :show-mental-model="groundingTreatmentEnabled"
           :pending-offers="pendingOffers"
           :completed-trades="completedTrades"
           @submit-trade="handleTradeSubmit"

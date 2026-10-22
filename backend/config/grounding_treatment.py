@@ -1,8 +1,7 @@
 """One server-owned switch for the Map Task grounding treatment.
 
-This controls the participant-visible Shared Mental Model, the H/W/R grounding
-pipeline, and corresponding mental-model updates. The public function returns
-only a read-only capability flag for clients.
+This controls the H/W/R grounding pipeline. The public function returns only a
+read-only capability flag for clients.
 """
 from __future__ import annotations
 

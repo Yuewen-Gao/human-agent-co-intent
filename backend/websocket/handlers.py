@@ -466,44 +466,6 @@ def register_handlers(socketio):
             except Exception:
                 pass
 
-    @socketio.on('mental_model_update')
-    def handle_mental_model_update(data):
-        """Persist a participant edit and broadcast the revisioned visible model."""
-        try:
-            session_identifier = data.get('session_id')
-            sender = data.get('sender')
-            if not session_identifier or not sender:
-                emit('mental_model_update_error', {'message': 'session_id and sender are required'})
-                return
-            import routes.session as session_module
-            from services.mental_model_service import apply_user_mental_model_update
-
-            session_key, session = None, None
-            for key, candidate in session_module.sessions.items():
-                if candidate.get('session_id') == session_identifier or key == session_identifier:
-                    session_key, session = key, candidate
-                    break
-            if not session:
-                emit('mental_model_update_error', {'message': 'Session not found'})
-                return
-            participant = next(
-                (item for item in session.get('participants', []) if (item.get('id') or item.get('participant_id')) == sender),
-                None,
-            )
-            if not participant or str(participant.get('type', '')).lower() in ('ai', 'ai_agent'):
-                emit('mental_model_update_error', {'message': 'Only human participants can edit the model'})
-                return
-            result = apply_user_mental_model_update(session, data.get('base_revision'), data.get('fields'))
-            if not result['changed']:
-                emit('mental_model_update_error', {'message': result['reason'] or 'No changes'})
-                return
-            session_module.commit_session(session_key, session)
-            room_id = session.get('session_id') or session_key
-            socketio.emit('mental_model_updated', {'session_id': room_id, 'mental_model': result['mental_model']}, room=room_id)
-        except Exception as exc:
-            print(f'[WebSocket] mental_model_update error: {exc}')
-            emit('mental_model_update_error', {'message': 'Unable to update mental model'})
-
     @socketio.on('send_message_context')
     def handle_send_message_context(data):
         """Attach screenshot/html to send_message log row after fast send_message (same action_id)."""

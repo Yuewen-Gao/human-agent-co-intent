@@ -200,15 +200,13 @@ def append_maptask_grid_context(
     prompt: str,
     participant: Mapping[str, Any],
     session: Mapping[str, Any],
-    *,
-    agent_participant_id: str | None = None,
 ) -> str:
     """Append only the Map Task context this agent role is allowed to inspect."""
     role = str(participant.get("role") or "guide").strip().lower()
     sections = [build_follower_current_workspace_context(session)]
     if role == "guide":
         sections.insert(0, build_guide_map_grid_context(participant))
-        sections.append(build_follower_trajectory_change_context(session, agent_participant_id))
+        sections.append(build_follower_trajectory_change_context(session))
     content = "\n".join(section for section in sections if section)
     return f"{prompt}\n{content}\n" if content else prompt
 
@@ -229,29 +227,23 @@ def _trajectory_cells(grid_text: str) -> set[tuple[int, int]] | None:
     }
 
 
-def _last_trajectory_grid_at_reply(
-    session: Mapping[str, Any], agent_participant_id: str | None
-) -> str | None:
-    records = session.get("agent_turn_records") if isinstance(session, Mapping) else None
-    if not isinstance(records, list) or not agent_participant_id:
-        return None
-    for record in reversed(records):
-        if not isinstance(record, Mapping) or record.get("agent_participant_id") != agent_participant_id:
-            continue
-        grid_text = record.get("trajectory_grid_at_reply")
-        return grid_text if isinstance(grid_text, str) and grid_text.strip() else None
-    return None
+# Written by the grounding orchestrator when a Guide message is sent.
+LAST_GUIDE_MESSAGE_KEY = "grounding_last_guide_message"
 
 
-def build_follower_trajectory_change_context(
-    session: Mapping[str, Any], agent_participant_id: str | None
-) -> str:
-    """Render changed trajectory cells since this Guide's preceding reply.
+def _trajectory_grid_at_last_guide_message(session: Mapping[str, Any]) -> str | None:
+    last = session.get(LAST_GUIDE_MESSAGE_KEY) if isinstance(session, Mapping) else None
+    grid_text = last.get("trajectory_grid") if isinstance(last, Mapping) else None
+    return grid_text if isinstance(grid_text, str) and grid_text.strip() else None
+
+
+def build_follower_trajectory_change_context(session: Mapping[str, Any]) -> str:
+    """Render changed trajectory cells since the Guide's last sent message.
 
     The first Guide reply has no preceding snapshot, so its complete workspace
     is already sufficient and no artificial delta is emitted.
     """
-    previous = _last_trajectory_grid_at_reply(session, agent_participant_id)
+    previous = _trajectory_grid_at_last_guide_message(session)
     current = follower_trajectory_grid_text(session)
     previous_cells = _trajectory_cells(previous) if previous else None
     current_cells = _trajectory_cells(current)

@@ -21,7 +21,11 @@ from .grounding_rules import (
     update_mode,
 )
 from services.llm_trace_logger import TraceContext, record_trace_result, trace_chat_completion
-from agent.map_task_as_guide.agent_session_context import _trajectory_cells, follower_trajectory_grid_text
+from agent.map_task_as_guide.agent_session_context import (
+    LAST_GUIDE_MESSAGE_KEY as _LAST_GUIDE_MESSAGE_KEY,
+    _trajectory_cells,
+    follower_trajectory_grid_text,
+)
 
 
 _PROMPTS = Path(__file__).resolve().parents[2] / "prompts" / "mapTaskGuidePrompts" / "groudingPrompts"
@@ -285,9 +289,6 @@ def record_repair_attempt(
     if _trajectory_cells(grid) is not None:
         attempt["trajectory_grid_at_repair"] = grid.strip()
     return _update_item(session, item_id, lambda item: item["repair_attempts"].append(attempt)) is not None
-
-
-_LAST_GUIDE_MESSAGE_KEY = "grounding_last_guide_message"
 
 
 def record_guide_message(session: dict[str, Any], acts: Any, reply: str) -> bool:
