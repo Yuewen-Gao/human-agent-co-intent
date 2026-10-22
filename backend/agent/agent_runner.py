@@ -33,6 +33,7 @@ from agent.map_task_as_guide.agent_session_context import (
 from agent.map_task_as_guide.grounding_as_guide.mental_model_update import (
     append_mental_model_reply_context,
 )
+from agent.map_task_as_guide.grounding_as_guide.grounding_images import map_image_parts, user_content as grounding_user_content
 from agent.map_task_as_guide.grounding_as_guide.orchestrator import (
     GroundingOrchestrator,
     parse_follower_action_decision,
@@ -314,6 +315,7 @@ class AgentRunner:
             # c2 Map Task Guide: use the two-stage grounding pipeline only when
             # the existing Awareness Dashboard exposes follower map progress.
             selected_acts: list = []
+            reply_images: list = []
             if self._uses_awareness_grounding_pipeline(participant, session):
                 decision = safe_decide(
                     GroundingOrchestrator(self.llm_client),
@@ -352,8 +354,10 @@ class AgentRunner:
                     selected_acts = list(decision.get('selected_acts') or [])
                     if decision.get('act_block'):
                         # The grounding decision chose a non-repair act; the
-                        # normal Guide reply realizes it.
+                        # normal Guide reply realizes it, with the maps for direction.
                         prompt += '\n' + decision['act_block']
+                        if getattr(self.llm_client, 'supports_multimodal_images', lambda: False)():
+                            reply_images = map_image_parts(session)
                     if decision.get('normal_guide_action') == 'give_next_segment':
                         prompt += (
                             '\n<GROUNDING HANDOFF>\n'
@@ -377,7 +381,9 @@ class AgentRunner:
             # print(f'{"="*80}\n')
             
             # Call LLM to generate actions
-            response, action_completion = self._call_llm(prompt, participant, session, trace_context=trace_context)
+            response, action_completion = self._call_llm(
+                prompt, participant, session, trace_context=trace_context, images=reply_images,
+            )
             
             if not response:
                 print(f'[AgentRunner] No response from LLM for participant {self.participant_id}')
@@ -1734,6 +1740,7 @@ Response:"""
         participant: Optional[Dict[str, Any]] = None,
         session: Optional[Dict[str, Any]] = None,
         trace_context: TraceContext | None = None,
+        images: Optional[list] = None,
     ) -> tuple[Optional[str], Any | None]:
         """Call LLM to generate actions from the textual prompt evidence."""
         if not self.llm_client:
@@ -1746,7 +1753,7 @@ Response:"""
             # Note: response_format is handled by the client implementation
             messages = [
                 {"role": "system", "content": "You are an AI agent participating in an economic experiment. Follow the instructions carefully and respond with valid JSON."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": grounding_user_content(prompt, images)}
             ]
             completion = None
             if trace_context is None:

@@ -91,6 +91,25 @@ def _redact_error(error: Exception | str) -> str:
     return re.sub(r"\bsk-[A-Za-z0-9_-]+", "[REDACTED]", text)
 
 
+def _without_image_data(messages: Any) -> Any:
+    """Replace inline image data URLs with a size note so traces stay small."""
+    if not isinstance(messages, list):
+        return messages
+    cleaned = []
+    for message in messages:
+        content = message.get("content") if isinstance(message, Mapping) else None
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                url = ((part.get("image_url") or {}).get("url") if isinstance(part, Mapping) else None)
+                if isinstance(url, str) and url.startswith("data:"):
+                    part = {"type": "image_url", "image_url": {"url": f"<inline image omitted: {len(url)} chars>"}}
+                parts.append(part)
+            message = {**message, "content": parts}
+        cleaned.append(message)
+    return cleaned
+
+
 def _logs_root(logs_root: Path | str | None) -> Path:
     if logs_root is not None:
         return Path(logs_root).resolve()
@@ -189,7 +208,7 @@ def trace_chat_completion(
             # Serialize inside _append_event's fail-open boundary. Do not deep-copy
             # caller objects here: an unusual but provider-valid object must not
             # prevent the original completion request from being sent.
-            "request_messages": messages,
+            "request_messages": _without_image_data(messages),
             "request_options": _redact_secrets(kwargs),
         }
         _append_event(context, request_event, logs_root=logs_root, durable=True)

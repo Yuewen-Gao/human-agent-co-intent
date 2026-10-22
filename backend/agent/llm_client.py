@@ -112,6 +112,10 @@ class OpenAIClient(LLMClient):
 class DeepSeekClient(OpenAIClient):
     """OpenAI-compatible client with explicit DeepSeek thinking control."""
 
+    def supports_multimodal_images(self) -> bool:
+        # The DeepSeek chat endpoint does not accept image_url content parts.
+        return False
+
     def __init__(
         self,
         api_key: str,

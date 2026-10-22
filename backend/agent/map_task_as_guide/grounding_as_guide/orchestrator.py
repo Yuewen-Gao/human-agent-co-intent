@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import grounding_acts
+from . import grounding_acts, grounding_images
 from .codebook import definitions_for, definitions_for_codes
 from .contract import parse_decision, parse_h, parse_json_object, parse_repair, parse_w
 from .fewshot_repository import (
@@ -451,8 +451,9 @@ def _nested(raw: str, key: str) -> str:
     return json.dumps(value[key] if isinstance(value.get(key), dict) else value)
 
 
-def _call_json(llm_client: Any, prompt: str, max_tokens: int, *, trace_context: TraceContext | None = None, stage: str = "") -> tuple[str, Any | None]:
-    messages = [{"role": "user", "content": prompt}]
+def _call_json(llm_client: Any, prompt: str, max_tokens: int, *, trace_context: TraceContext | None = None, stage: str = "",
+               images: list[dict[str, Any]] | None = None) -> tuple[str, Any | None]:
+    messages = [{"role": "user", "content": grounding_images.user_content(prompt, images)}]
     if trace_context is None:
         return llm_client.chat_completions_create(messages=messages, temperature=0, max_tokens=max_tokens, response_format={"type": "json_object"}), None
     completion = trace_chat_completion(llm_client, replace(trace_context, stage=stage), messages=messages, temperature=0, max_tokens=max_tokens, response_format={"type": "json_object"})
@@ -605,8 +606,11 @@ class GroundingOrchestrator:
         the decision call owns item outcomes and acts, and the reply stage only
         words the selected act.
         """
-        h, w = self._diagnose_h_and_w(evidence, trace_context)
         session = session if session is not None else {}
+        # Map images help the stages that judge route direction: H and the reply.
+        images = (grounding_images.map_image_parts(session)
+                  if getattr(self._llm, "supports_multimodal_images", lambda: False)() else [])
+        h, w = self._diagnose_h_and_w(evidence, trace_context, images)
         decision = self._decide(session, evidence, h, w, trace_context)
         w_codes = w.get("w_codes", ())
         item_fields = {
@@ -660,6 +664,7 @@ class GroundingOrchestrator:
             REPAIR_MAX_TOKENS,
             trace_context=trace_context,
             stage="grounding.repair",
+            images=images,
         )
         repair = parse_repair(repair_raw, allow_r7=grounding_acts.r7_allowed(target))
         if not repair:
@@ -696,7 +701,7 @@ class GroundingOrchestrator:
         return result
 
     def _diagnose_h_and_w(
-        self, evidence: str, trace_context: TraceContext | None
+        self, evidence: str, trace_context: TraceContext | None, images: list[dict[str, Any]] | None = None
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Run H and W as independent requests in parallel.
 
@@ -706,15 +711,16 @@ class GroundingOrchestrator:
         """
         budget = _joint_diagnosis_max_tokens(self._llm)
 
-        def run(prompt: str, stage: str, key: str, parser: Any) -> dict[str, Any]:
-            raw, trace = _call_json(self._llm, prompt, budget, trace_context=trace_context, stage=stage)
+        def run(prompt: str, stage: str, key: str, parser: Any, stage_images: Any = None) -> dict[str, Any]:
+            raw, trace = _call_json(self._llm, prompt, budget, trace_context=trace_context, stage=stage,
+                                    images=stage_images)
             parsed = parser(_nested(raw, key))
             if trace:
                 record_trace_result(trace, parsed)
             return parsed
 
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="grounding-diagnosis") as pool:
-            h_future = pool.submit(run, _h_diagnosis_prompt(evidence), "grounding.h", "h", parse_h)
+            h_future = pool.submit(run, _h_diagnosis_prompt(evidence), "grounding.h", "h", parse_h, images)
             w_future = pool.submit(run, _w_diagnosis_prompt(evidence), "grounding.w", "w", parse_w)
             h = h_future.result()
             try:
