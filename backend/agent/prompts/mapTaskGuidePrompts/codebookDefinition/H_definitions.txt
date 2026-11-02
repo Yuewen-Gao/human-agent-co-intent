@@ -1,41 +1,43 @@
 # How is possible misalignment detected? (H)
 
-Code one primary observable cue that first makes possible misalignment warrant attention. A cue is evidence of possible non-grounding, not proof of private mental state.
+Code one primary observable cue that first makes possible misalignment warrant attention. A cue is evidence of possible non-grounding, not proof of a private mental state. "Work" means the task result a participant produces (for example, a drawing, a document, or a configuration); it can be observed directly or described by the participant who produced it.
 
 H1. other_initiated_repair
-Definition: The recipient explicitly signals a problem with the prior contribution and requests clarification, specification, repetition, or confirmation.
-Use when: A participant or agent produces an open request, restricted request, or restricted offer in response to the preceding contribution.
-Operational rule: IF a current visible message explicitly asks to clarify, repeat, specify, or confirm a prior task contribution, THEN classify H1 and route to repair. Record the prior instruction or interpretation that the request leaves unresolved.
+Definition: The recipient explicitly signals a problem with the other party's prior contribution and requests clarification, specification, repetition, or confirmation of what it meant.
+Use when: A participant produces an open request ("what?"), a restricted request ("which one?"), or a restricted offer, that is, a candidate understanding of the other party's contribution put up for confirmation ("you mean the left one?").
+Do not use when: The participant only asks the other party to evaluate their own result or work ("like this?", "how is this?") without questioning what the prior contribution meant; that is not H1.
+Operational rule: IF a message explicitly asks to clarify, repeat, or specify the other party's prior contribution, or offers a candidate understanding of it for confirmation, THEN classify H1.
 
 H2. insufficient_acceptance_evidence
-Definition: A contribution needing confirmation receives no sufficient positive evidence of understanding after a reasonable opportunity to respond.
-Use when: No acknowledgement, relevant next contribution, restatement, or task action demonstrates understanding.
-Do not use when: Silence before the partner has had a real opportunity to respond, interface delay, or a contribution that needs no uptake.
-Operational rule: IF a contribution of yours that needs the partner's uptake (an instruction, proposal, question, or repair) has had a real opportunity for a response, AND no later visible message or action shows acknowledgement, an accurate restatement, or a task action consistent with it, THEN classify H2. A real opportunity exists when the partner's next contribution addresses something else, or when the trigger is `partner_idle` (no visible action for the idle window since your contribution). Do not classify H2 before the idle window has passed, from interface delay, or for a contribution that needs no uptake (for example, a closing acknowledgement).
+Definition: A contribution needing uptake receives no positive evidence of understanding after a real opportunity to respond.
+Use when: No acknowledgement, relevant next contribution, restatement, or consistent task action follows the contribution.
+Do not use when: The partner has not yet had a real opportunity to respond, the delay comes from the interface, the contribution needs no uptake (for example, a closing acknowledgement), or the content is already settled between the parties.
+Operational rule: IF a contribution that needs the partner's uptake (an instruction, proposal, question, or repair) has had a real opportunity for a response, AND no later message or observable action shows acknowledgement, an accurate restatement, or a task action consistent with it, THEN classify H2. A real opportunity exists when the partner's next contribution addresses something else, or when enough time has passed with no observable partner action.
 
 H3. incompatible_public_response
 Definition: A public reply, restatement, or action demonstrates an interpretation incompatible with an earlier shared instruction, task state, or commitment.
-Use when: The incompatibility is observable in dialogue or a shared representation.
-Do not use when: It is only an analyst guess about intention.
-Operational rule: IF an earlier visible instruction, task state, or commitment conflicts with a later visible reply, drawing, or restatement, THEN classify H3 and route to repair. The conflict must be expressible as an observable expected-versus-observed difference; do not infer it from a guess about private intention. IF that conflict reveals that the Guide and Follower maps represent a route-relevant landmark relation differently, THEN reconstruct the current target segment from the ordered Guide route and express its actionable target in Follower-local landmark relations before repair.
+Use when: The incompatibility is observable in the dialogue or in a shared representation.
+Do not use when: It is only a guess about intention.
+Operational rule: IF an earlier instruction, task state, or commitment conflicts with a later reply, restatement, or action, AND the conflict can be stated as an observable expected-versus-observed difference, THEN classify H3.
 
 H4. action_plan_deviation
-Definition: An observed task action departs from an agreed or externally represented plan, procedure, route, or constraint.
-Use when: There is a traceable reference plan and a subsequent action that does not fit it.
-Do not use when: An action is merely unsuccessful and no plan was established.
-Operational rule: IF `<AGENT TRIGGER>` says `follower_trajectory_changed` AND the fresh Follower trace departs from the active target route segment, THEN classify H4 and route to repair. Establish the active segment first from the latest visible Guide instruction, then from the Guide map's landmark-relative route where needed. If the visible trace has already completed or passed beyond the prior instruction's local segment, do not keep treating that old instruction as active; reconstruct the next unfinished segment from the ordered Guide route. For H4, record the active segment, its source, the relation `departs`, and one specific landmark-relative observable departure. A generic claim that the trace is “moving away” is not sufficient. IF the fresh trace instead advances along or completes that active segment without a departure, THEN classify H7; use `correct` and hand off to the ordinary Guide only when the segment is complete.
+Definition: A task action, observed directly or described by the partner, departs from an agreed or externally represented plan, procedure, route, or constraint.
+Use when: There is a traceable reference plan and a later action that does not fit it.
+Do not use when: An action is merely unsuccessful and no plan was established; the action is still in progress toward the plan (for example, a partial result, or an undone step being redone); or the difference is imprecision that would not change the outcome. An action that fits the plan but not the latest instruction about it is not a departure: the instruction was wrong.
+Operational rule: IF the partner's new work, observed directly or as they describe it, departs from the active part of the plan in a way that would change the outcome or where the next step must start, THEN classify H4. Establish the active part from the plan itself, and use the latest instruction only to locate which part is being worked on. A part of the plan that the work has already completed or passed is no longer active.
 
 H5. workspace_representation_conflict
-Definition: Public workspace representations differ on a task-relevant artifact, location, version, visibility, or state.
-Use when: The conflict can be tied to the shared map, document, canvas, or system view.
-Operational rule: IF the Guide and Follower workspaces show conflicting task-relevant representations of the landmark, route segment, artifact, visibility, or state currently at issue, THEN classify H5 and route to repair. Record the expected and observed map relation. Reconstruct the current target segment from the ordered Guide route, then translate it into Follower-local landmark relations; never continue a pre-difference instruction that uses Guide-coordinate relations. Do not classify H5 for their expected preset coordinate or orientation differences alone.
+Definition: The parties' workspaces differ on a task-relevant object, location, version, visibility, or state.
+Use when: The difference can be tied to the shared map, document, canvas, or system view.
+Do not use when: The difference exists but nothing in the current exchange depends on it.
+Operational rule: IF the two parties' workspaces differ in a way that a current contribution depends on (what an object is, where it is, or whether it can be seen), THEN classify H5.
 
 H6. self_reported_uncertainty
-Definition: A participant or agent explicitly states uncertainty about their own understanding, interpretation, or ability to proceed.
+Definition: A participant explicitly states uncertainty about their own understanding, interpretation, or ability to proceed.
 Use when: The uncertainty is directly expressed.
-Do not use when: Treating uncertainty alone as proof that two parties are misaligned.
-Operational rule: IF a current visible message directly states uncertainty about how to interpret or continue the task, THEN classify H6 and route to repair. Record the unresolved instruction, route relation, or task state named by the participant; do not infer H6 from behavior alone.
+Do not use when: Treating uncertainty alone as proof that the two parties are misaligned.
+Operational rule: IF a message directly states uncertainty about how to interpret or continue the task, THEN classify H6. Do not infer H6 from behavior alone.
 
 H7. not_observed
-Definition: No observable detection cue is present in the episode record.
-Operational rule: IF none of H1-H6's IF conditions is satisfied by current observable evidence, THEN classify H7 and do not route to repair. IF a fresh Follower trajectory visibly completes the active intended segment, THEN hand off to the ordinary Guide to give the next executable segment; OTHERWISE, let the ordinary Guide answer a non-repair question or wait.
+Definition: No observable cue for H1–H6 is present.
+Operational rule: IF none of H1–H6's conditions is satisfied by the current evidence, THEN classify H7.

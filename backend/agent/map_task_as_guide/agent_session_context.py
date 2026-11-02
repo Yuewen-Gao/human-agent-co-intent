@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from agent.map_task_as_guide.map_processing.merge_follower_current_map import (
     build_follower_current_workspace_context as render_follower_workspace,
 )
+from config.map_sets import display_path, grid_path_for_map, session_grid_path
 
 _DEFAULT_GUIDE_GRID_PATH = (
     Path(__file__).resolve().parents[2] / "almanac_maps" / "map_guide.json"
@@ -15,6 +17,18 @@ _DEFAULT_GUIDE_GRID_PATH = (
 _DEFAULT_FOLLOWER_GRID_PATH = (
     Path(__file__).resolve().parents[2] / "almanac_maps" / "map.json"
 )
+
+
+def guide_grid_path(participant: Mapping[str, Any]) -> Path:
+    """The Guide grid JSON for the map this participant was given (ALMANAC by default)."""
+    params = participant.get("experiment_params") if isinstance(participant, Mapping) else None
+    map_entry = params.get("map") if isinstance(params, Mapping) else None
+    return grid_path_for_map(map_entry, "guide", _DEFAULT_GUIDE_GRID_PATH)
+
+
+def follower_grid_path(session: Mapping[str, Any]) -> Path:
+    """The Follower grid JSON for this session's Follower map (ALMANAC by default)."""
+    return session_grid_path(session, "follower", _DEFAULT_FOLLOWER_GRID_PATH)
 
 
 def _valid_cell(value: Any, rows: int, cols: int) -> tuple[int, int] | None:
@@ -30,15 +44,16 @@ def _valid_cell(value: Any, rows: int, cols: int) -> tuple[int, int] | None:
 def build_guide_map_grid_context(participant: Mapping[str, Any]) -> str:
     """Render the researcher-provided Guide ground-truth JSON as a text grid.
 
-    The default preset is ``backend/almanac_maps/map_guide.json``.  It is deliberately
+    The grid comes from the participant's map (see ``config/map_sets.py``).  It is deliberately
     independent of the displayed PNG so the route and landmark coordinates are
     available to the agent in a stable, inspectable format.
     """
-    if not isinstance(participant, Mapping) or not _DEFAULT_GUIDE_GRID_PATH.is_file():
+    grid_path = guide_grid_path(participant)
+    if not isinstance(participant, Mapping) or not grid_path.is_file():
         return ""
 
     try:
-        map_data = json.loads(_DEFAULT_GUIDE_GRID_PATH.read_text(encoding="utf-8"))
+        map_data = json.loads(grid_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return ""
 
@@ -95,7 +110,7 @@ def build_guide_map_grid_context(participant: Mapping[str, Any]) -> str:
     landmarks_text = "\n".join(landmark_lines) or "- none"
     return (
         "<GUIDE MAP GRID>\n"
-        "source: backend/almanac_maps/map_guide.json\n"
+        f"source: {display_path(grid_path)}\n"
         f"grid_size: {rows} rows x {cols} columns\n"
         f"start: {start if start else 'unknown'}\n"
         f"end: {end if end else 'unknown'}\n"
@@ -162,10 +177,11 @@ def build_follower_current_workspace_context(session: Mapping[str, Any]) -> str:
     A malformed or unavailable drawing is omitted rather than silently merged with
     different coordinates.
     """
-    if not isinstance(session, Mapping) or not _DEFAULT_FOLLOWER_GRID_PATH.is_file():
+    grid_path = follower_grid_path(session)
+    if not isinstance(session, Mapping) or not grid_path.is_file():
         return ""
     try:
-        follower_map = json.loads(_DEFAULT_FOLLOWER_GRID_PATH.read_text(encoding="utf-8"))
+        follower_map = json.loads(grid_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return ""
     if not isinstance(follower_map, Mapping):
@@ -191,9 +207,26 @@ def build_follower_current_workspace_context(session: Mapping[str, Any]) -> str:
         return ""
     return workspace.replace(
         "<FOLLOWER CURRENT WORKSPACE>\n",
-        "<FOLLOWER CURRENT WORKSPACE>\nsource: backend/almanac_maps/map.json\n",
+        f"<FOLLOWER CURRENT WORKSPACE>\nsource: {display_path(grid_path)}\n",
         1,
     )
+
+
+GUIDE_BLIND_NOTE = (
+    "<VISIBILITY>\n"
+    "You cannot see the Follower's map or drawing in this session. You know only what the Follower tells you; "
+    "their landmarks may be placed differently from yours, be missing, or go by another name. Do not assume they drew what you asked, "
+    "and do not describe or judge their drawing beyond what they have told you.\n"
+    "</VISIBILITY>"
+)
+
+
+def guide_sees_follower_drawing(session: Mapping[str, Any]) -> bool:
+    """`Session.Interaction.guideSeesFollowerDrawing` when the session sets it, else the server default."""
+    from config.grounding_treatment import GUIDE_SEES_FOLLOWER_DRAWING
+    interaction = session.get("interaction") if isinstance(session, Mapping) else None
+    value = interaction.get("guideSeesFollowerDrawing") if isinstance(interaction, Mapping) else None
+    return value if isinstance(value, bool) else bool(GUIDE_SEES_FOLLOWER_DRAWING)
 
 
 def append_maptask_grid_context(
@@ -203,10 +236,16 @@ def append_maptask_grid_context(
 ) -> str:
     """Append only the Map Task context this agent role is allowed to inspect."""
     role = str(participant.get("role") or "guide").strip().lower()
-    sections = [build_follower_current_workspace_context(session)]
-    if role == "guide":
-        sections.insert(0, build_guide_map_grid_context(participant))
-        sections.append(build_follower_trajectory_change_context(session))
+    if role == "guide" and not guide_sees_follower_drawing(session):
+        sections = [build_guide_map_grid_context(participant), GUIDE_BLIND_NOTE]
+    else:
+        sections = [build_follower_current_workspace_context(session)]
+        if role == "follower":
+            from agent.map_task_as_follower.trajectory_snapshot import route_points_context
+            sections.append(route_points_context(_follower_progress(session), follower_grid_path(session)))
+        if role == "guide":
+            sections.insert(0, build_guide_map_grid_context(participant))
+            sections.append(build_follower_trajectory_change_context(session))
     content = "\n".join(section for section in sections if section)
     return f"{prompt}\n{content}\n" if content else prompt
 
@@ -235,6 +274,87 @@ def _trajectory_grid_at_last_guide_message(session: Mapping[str, Any]) -> str | 
     last = session.get(LAST_GUIDE_MESSAGE_KEY) if isinstance(session, Mapping) else None
     grid_text = last.get("trajectory_grid") if isinstance(last, Mapping) else None
     return grid_text if isinstance(grid_text, str) and grid_text.strip() else None
+
+
+# The drawing and messages the last completed Guide judgement was made on.
+LAST_JUDGED_KEY = "grounding_last_judged"
+
+# A Guide message that needs an answer has had a real chance to get one once it
+# has waited this long with no visible partner action since.
+RESPONSE_WINDOW_SECONDS = 45.0
+
+
+def _parse_time(value: Any) -> datetime | None:
+    """ISO time as aware UTC ("Z" suffix or naive means UTC), or None."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def turn_changes(
+    session: Mapping[str, Any], grid: str | None, messages_seen_until: str, now: datetime | None = None
+) -> dict[str, Any]:
+    """What is new since the last judged turn, and how long the Guide has waited.
+
+    Only what the Guide can see counts: without the drawing, the partner's
+    visible actions are their messages. The response window passes when neither
+    side has acted for RESPONSE_WINDOW_SECONDS since the Guide's last message.
+    `anything_new` is false when a turn would be judged on the same input as the last one.
+    """
+    now = now or datetime.now(timezone.utc)
+    last = session.get(LAST_JUDGED_KEY) if isinstance(session, Mapping) else None
+    last = last if isinstance(last, Mapping) else {}
+    sees = guide_sees_follower_drawing(session)
+    work_changed = sees and (
+        (_trajectory_cells(grid or "") or set()) != (_trajectory_cells(last.get("trajectory_grid") or "") or set())
+    )
+    work_changed_at = now.isoformat() if work_changed else last.get("work_changed_at")
+    new_messages = messages_seen_until != last.get("messages_seen_until", "")
+
+    actions = [t for t in (_parse_time(messages_seen_until), _parse_time(work_changed_at) if sees else None) if t]
+    partner_at = max(actions) if actions else None
+    guide_message = session.get(LAST_GUIDE_MESSAGE_KEY) if isinstance(session, Mapping) else None
+    guide_at = _parse_time(guide_message.get("timestamp")) if isinstance(guide_message, Mapping) else None
+    since_guide = (now - guide_at).total_seconds() if guide_at else None
+    # Timed from the last visible action of either side: silence after the partner's own reply counts too.
+    last_action = max(guide_at, partner_at) if guide_at and partner_at else guide_at
+    window_passed = bool(last_action and (now - last_action).total_seconds() >= RESPONSE_WINDOW_SECONDS)
+    return {
+        "new_partner_messages": new_messages,
+        "partner_work_changed": ("yes" if work_changed else "no") if sees else "not_visible",
+        "seconds_since_your_last_message": round(since_guide) if since_guide is not None else None,
+        "seconds_since_partner_last_visible_action": round((now - partner_at).total_seconds()) if partner_at else None,
+        "response_window_passed": window_passed,
+        "anything_new": new_messages or work_changed or window_passed != bool(last.get("response_window_passed")),
+        "work_changed_at": work_changed_at,
+    }
+
+
+def changes_block(changes: Mapping[str, Any]) -> str:
+    def value(key: str) -> str:
+        item = changes.get(key)
+        return "none" if item is None else ("yes" if item is True else "no" if item is False else str(item))
+
+    keys = ("new_partner_messages", "partner_work_changed", "seconds_since_your_last_message",
+            "seconds_since_partner_last_visible_action", "response_window_passed")
+    return "<CHANGES>\n" + "\n".join(f"{key}: {value(key)}" for key in keys) + "\n</CHANGES>"
+
+
+def record_judged_turn(
+    session: dict[str, Any], grid: str | None, messages_seen_until: str, changes: Mapping[str, Any] | None = None
+) -> None:
+    changes = changes or {}
+    session[LAST_JUDGED_KEY] = {
+        "trajectory_grid": (grid or "").strip(),
+        "messages_seen_until": messages_seen_until,
+        "work_changed_at": changes.get("work_changed_at"),
+        "response_window_passed": bool(changes.get("response_window_passed")),
+    }
 
 
 def build_follower_trajectory_change_context(session: Mapping[str, Any]) -> str:
@@ -309,11 +429,34 @@ def build_session_conversation_memory(
     return _render_messages(names, visible_messages)
 
 
+def latest_visible_message_time(agent_participant_id: str, session: Mapping[str, Any]) -> str:
+    """Timestamp of the newest partner message the agent can see now ("" if none).
+
+    The agent's own messages are left out: sending a reply is not new input.
+    """
+    _, visible_messages = _visible_messages_and_names(agent_participant_id, session)
+    partner = [m for m in visible_messages if m.get("sender") != agent_participant_id]
+    return str(partner[-1].get("timestamp") or "") if partner else ""
+
+
 def build_new_visible_messages(
     agent_participant_id: str, session: Mapping[str, Any]
 ) -> str:
-    """Return visible messages added after this Guide's last sent message."""
+    """Return partner messages the Guide has not yet answered.
+
+    When the last sent Guide message records which messages its turn had seen,
+    everything the partner sent after that point is new, including messages
+    that arrived while the turn was running and so landed before the reply.
+    Only the server-owned Guide writes that record (Map Task has one AI role).
+    """
     names, visible_messages = _visible_messages_and_names(agent_participant_id, session)
+    last = session.get(LAST_GUIDE_MESSAGE_KEY) if isinstance(session, Mapping) else None
+    seen_until = last.get("messages_seen_until") if isinstance(last, Mapping) else None
+    if isinstance(seen_until, str):
+        return _render_messages(names, [
+            message for message in visible_messages
+            if message.get("sender") != agent_participant_id and str(message.get("timestamp") or "") > seen_until
+        ])
     last_guide_index = max(
         (index for index, message in enumerate(visible_messages) if message.get("sender") == agent_participant_id),
         default=-1,

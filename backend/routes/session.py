@@ -356,46 +356,64 @@ def hydrate_sessions_from_db() -> None:
         print(f'[Session] hydrate from DB failed: {e}')
 
 
-def restore_running_agent_runners() -> None:
-    """Recreate in-memory runners for persisted sessions that were running at startup."""
+def _ai_participant_ids(session: dict) -> list:
+    return [
+        p.get('id') or p.get('participant_id')
+        for p in session.get('participants', [])
+        if (p.get('type') or '').lower() in ('ai', 'ai_agent') and (p.get('id') or p.get('participant_id'))
+    ]
+
+
+def start_session_agent_runners(session_key: str, session: dict) -> None:
+    """Run a session's AI agents while a human participant has its page open.
+
+    Called when a participant page joins the session room, including the automatic
+    re-join after a backend restart: nothing is restored at startup without one.
+    Periodic checks keep their own idle and time limits.
+    """
     try:
-        from agent.agent_runner import get_agent_runner, register_agent_runner
+        from agent.agent_runner import get_agent_runner, register_agent_runner, start_agent_runner
         from routes.participant import apply_maptask_ai_role_switch
 
-        for session_key, session in sessions.items():
-            if session.get('status') != 'running':
+        if session.get('status') != 'running':
+            return
+        experiment_type = session.get('experiment_type')
+        if not experiment_type:
+            return
+        if str(experiment_type).lower() == 'maptask':
+            apply_maptask_ai_role_switch(session)
+
+        session_id = session.get('session_id') or session_key
+        roles = {p.get('id') or p.get('participant_id'): p.get('role') for p in session.get('participants', [])}
+        for participant_id in _ai_participant_ids(session):
+            if get_agent_runner(participant_id, session_id):
                 continue
-
-            session_id = session.get('session_id') or session_key
-            experiment_type = session.get('experiment_type')
-            if not experiment_type:
-                continue
-            if str(experiment_type).lower() == 'maptask':
-                apply_maptask_ai_role_switch(session)
-
-            restored = False
-            for participant in session.get('participants', []):
-                if (participant.get('type') or '').lower() not in ('ai', 'ai_agent'):
-                    continue
-
-                participant_id = participant.get('id') or participant.get('participant_id')
-                if not participant_id or get_agent_runner(participant_id, session_id):
-                    continue
-
-                register_agent_runner(
-                    participant_id=participant_id,
-                    session_id=session_id,
-                    experiment_type=experiment_type,
-                    participant_role=participant.get('role'),
-                )
-                participant['status'] = 'online'
-                restored = True
-                print(f'[Session] Restored agent runner for participant {participant_id} in running session {session_id}')
-
-            if restored:
-                commit_session(session_key, session)
+            register_agent_runner(
+                participant_id=participant_id,
+                session_id=session_id,
+                experiment_type=experiment_type,
+                participant_role=roles.get(participant_id),
+            )
+            start_agent_runner(participant_id=participant_id, session_id=session_id)
+            print(f'[Session] Started agent runner for participant {participant_id}: a participant page is open')
     except Exception as e:
-        print(f'[Session] Error restoring running agent runners: {e}')
+        print(f'[Session] Error starting agent runners: {e}')
+        import traceback
+        traceback.print_exc()
+
+
+def stop_session_agent_runners(session: dict, session_key: str) -> None:
+    """Stop a session's AI agents once no human participant page is open."""
+    try:
+        from agent.agent_runner import get_agent_runner, stop_agent_runner
+
+        session_id = session.get('session_id') or session_key
+        for participant_id in _ai_participant_ids(session):
+            if get_agent_runner(participant_id, session_id):
+                stop_agent_runner(participant_id=participant_id, session_id=session_id)
+                print(f'[Session] Stopped agent runner for participant {participant_id}: no participant page is open')
+    except Exception as e:
+        print(f'[Session] Error stopping agent runners: {e}')
         import traceback
         traceback.print_exc()
 

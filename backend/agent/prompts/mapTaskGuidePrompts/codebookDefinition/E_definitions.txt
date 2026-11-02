@@ -1,0 +1,22 @@
+# Evidence Strength (E) and Grounding Criterion
+
+Unit of analysis: one misalignment item. Judge strength from the whole conversation and the new information, not from the latest message alone. Strength measures positive evidence that you and the partner hold the same intended (or repaired) interpretation. Evidence against that interpretation (a renewed question about it, a description or action that contradicts it) is counter-evidence, not low strength: while it stands, the item cannot close.
+
+Evidence types (Clark and Schaefer, 1989; Roque and Traum, 2008): no response; continued attention; moving on to the next step; acknowledgement; repeating your words back; demonstrating their own interpretation (in their own words, by their own reference points, or by using it in a relevant next contribution); an observable task action that shows it.
+
+E0. no_evidence
+No relevant response or action.
+
+E1. weak_implicit
+Continued attention, a vague response, or moving on to the next step.
+
+E2. explicit_acknowledgement
+A statement of receipt or understanding that does not show an interpretation: "ok", "got it", "yes" to a yes/no question, a verbatim repeat of your words, or a report of having done it ("done") when you cannot observe the result. A "yes" or a verbatim repeat shows that your words were received, not how they were understood; when a reference point may be placed differently for the two parties, such an answer is E2 at most.
+
+E3. content_specific
+Evidence that shows the partner's own interpretation: a restatement in their own terms, specific reference points on their side, a relevant next contribution that uses the content, or an observable task action (their visible work) that matches it.
+
+E4. corroborated
+Two independent content-specific pieces agree: for example, the partner's description and their observable work, or a content-specific statement followed by consistent later contributions after they had a real chance to correct it.
+
+Enough for current purposes (Clark and Schaefer's grounding criterion): weigh how much a misunderstanding of an item or of pending content would hurt the ultimate goal of the task (how much later steps build on it, and whether it could still be caught later) against the communication cost of getting more evidence (least collaborative effort: every request costs the partner effort). An item or pending content needs only as much evidence as this weighing calls for. What the situation can provide matters too (when you cannot observe the partner's work, an observable task action is not available), and a partner who was asked and did not give stronger evidence has also told you something.

@@ -4,13 +4,13 @@ Unit of analysis: a grounding/repair episode, not a single action. An episode be
 
 Boundary: misalignment means a failure of shared understanding. If both parties understand each other but prefer different strategies, priorities, or trade-offs, it is disagreement rather than misalignment. If disagreement emerges from an earlier misunderstanding, the earlier misunderstanding is the episode and the later state is its outcome.
 
-Code the status of the repair problem at episode closure. Outcome is not the repair strategy, the mental-model update relation, or overall task performance. Record closure_evidence (explicit_acknowledgement, accurate_restatement, consistent_task_action, or none_observed) as an evidence field rather than as an Outcome value. A visible correction of the shared artifact, such as a redrawn route segment, counts as consistent_task_action.
+Code the status of the repair problem at episode closure. Outcome is not the repair strategy, the mental-model update relation, or overall task performance. Whether the repair problem is solved is a judgement of evidence: record the evidence strength (E0–E4, see Evidence Strength) as an evidence field rather than as an Outcome value. A visible correction of the shared artifact, such as a redrawn route segment, is an observable task action.
 
 O1. solution
 Definition: The repair problem receives a solution, supported by sufficient positive evidence that collaborators can proceed on the repaired interpretation.
-Use when: A repaired interpretation is accepted, accurately restated, or followed by a task action consistent with it.
+Use when: The evidence that you and the partner hold the same repaired interpretation is enough for current purposes, given how important the episode is, and no counter-evidence stands.
 Do not use when: A candidate explanation is only presented, or clarification is requested, without later evidence of understanding; use O4 or O2 as appropriate.
-Example: The follower says "okay, left of the volcano" and draws the corresponding route.
+Example: The partner restates the step in their own words and carries it out accordingly.
 
 O2. abandonment
 Definition: The repair problem is left without a solution as interaction moves on, changes topic, or explicitly terminates the attempt.

@@ -7,12 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from config.experiments import get_experiment_by_id
-
-
-_MAPS = (
-    ("follower", "ALMANAC_follower_map.png"),
-    ("guide", "ALMANAC_guide_map.png"),
-)
+from config.map_sets import active_map_files
 
 
 def _utc_now_iso_z() -> str:
@@ -38,7 +33,7 @@ def create_public_maptask_session(session_key: str) -> dict[str, Any]:
             "original_filename": filename,
             "file_path": f"/api/maps/{filename}",
         }
-        for role, filename in _MAPS
+        for role, filename in active_map_files()
     ]
     return {
         "session_id": session_id,
@@ -52,10 +47,8 @@ def create_public_maptask_session(session_key: str) -> dict[str, Any]:
             "communicationLevel": "Private Messaging",
             "communicationMedia": ["text"],
             "typeIndicator": "enabled",
-            "awarenessDashboard": {
-                "enabled": True,
-                "items": ["Participant.name", "Participant.map_progress"],
-            },
+            # C1: no Awareness Dashboard, so a human Guide does not see the Follower's drawing.
+            "awarenessDashboard": {"enabled": False, "items": []},
             "messageLength": False,
             "agentPerceptionTimeWindow": 15,
             "rationales": "step_wise",

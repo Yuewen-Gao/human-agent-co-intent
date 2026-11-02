@@ -16,8 +16,19 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
 from functions import parse_iso_timestamp_utc
-from config.grounding_treatment import grounding_treatment_enabled
+from config.grounding_treatment import GROUNDING_TREATMENT, PLAIN_GUIDE_MAP_IMAGES, grounding_treatment_enabled
 import routes.session as session_module
+
+# Map Task Guide: besides partner messages, a periodic check runs this long after the
+# last turn ended (the session's `agentPerceptionTimeWindow` overrides it). The wait
+# doubles after every two quiet checks in a row (no message sent), up to this many times.
+DEFAULT_PERCEPTION_WINDOW_SECONDS = 15.0
+MAX_PERIODIC_DOUBLINGS = 2
+# No periodic check once no human has sent a message for this long (counted from the
+# session start until the first one); a new message wakes the agent again.
+PERIODIC_IDLE_STOP_SECONDS = 600.0
+# Periodic checks in an untimed session (Map Task with annotation) stop after this long.
+UNTIMED_SESSION_PERIODIC_LIMIT_MINUTES = 30
 from routes.participant import (
     find_session_by_identifier, 
     get_value_from_session_params,
@@ -28,16 +39,33 @@ from agent.llm_client import create_llm_client, LLMClient
 from agent.map_task_as_guide.agent_session_context import (
     append_maptask_grid_context,
     append_session_conversation_memory,
+    changes_block,
+    follower_trajectory_grid_text,
+    guide_sees_follower_drawing,
+    latest_visible_message_time,
+    record_judged_turn,
+    turn_changes,
 )
-from agent.map_task_as_guide.grounding_as_guide.grounding_images import map_image_parts, user_content as grounding_user_content
+from agent.map_task_as_guide.grounding_as_guide.grounding_images import (
+    FOLLOWER_IMAGE_NOTE,
+    follower_image_parts,
+    map_image_parts,
+    user_content as grounding_user_content,
+)
 from agent.map_task_as_guide.grounding_as_guide.orchestrator import (
     GroundingOrchestrator,
     parse_follower_action_decision,
     record_guide_message,
     record_repair_attempt,
     safe_decide,
+    safe_decide_follower,
 )
-from agent.map_task_as_follower.context import latest_visible_human_guide_message_context
+from agent.map_task_as_follower.context import (
+    follower_visibility_note,
+    last_route_update_failure_context,
+    latest_visible_human_guide_message_context,
+    record_route_update_result,
+)
 from services.agent_reply_status import (
     emit_agent_reply_status,
     should_publish_agent_reply_status,
@@ -87,6 +115,9 @@ class AgentRunner:
         self._message_trigger_lock = threading.Lock()
         self._message_trigger_timer = None
         self._handled_event_keys: set[str] = set()
+        self._quiet_periodic_turns = 0
+        self._last_turn_ended_at = time.monotonic()
+        self._turn_spoke = False
         self.protocol = AgentContextProtocol(participant_id, session_id, experiment_type)
         
         # Load prompt template (will be loaded later when we have participant info)
@@ -136,9 +167,10 @@ class AgentRunner:
         
         if (self.experiment_type or '').lower() != 'maptask':
             self.perception_thread = threading.Thread(target=self._perception_loop, daemon=True)
-            self.perception_thread.start()
         else:
-            print(f'[AgentRunner] Map Task agent {self.participant_id} uses event-driven perception')
+            # Messages wake any Map Task agent; the Guide also runs periodic checks.
+            self.perception_thread = threading.Thread(target=self._maptask_guide_loop, daemon=True)
+        self.perception_thread.start()
         print(f'[AgentRunner] Started agent {self.participant_id} for session {self.session_id}')
     
     def stop(self):
@@ -195,6 +227,106 @@ class AgentRunner:
                 # Wait a bit before retrying
                 time.sleep(5)
     
+    def _periodic_interval(self, window: float) -> float:
+        with self._message_trigger_lock:
+            quiet = self._quiet_periodic_turns
+        return window * 2 ** min(quiet // 2, MAX_PERIODIC_DOUBLINGS)
+
+    @staticmethod
+    def _last_human_activity(session: Dict[str, Any]) -> Optional[datetime]:
+        """The newest human message, or the session start before any; None if neither is known."""
+        def parsed(value: Any) -> Optional[datetime]:
+            try:
+                return parse_iso_timestamp_utc(value)
+            except (TypeError, ValueError):
+                return None
+
+        humans = {
+            p.get('id') or p.get('participant_id')
+            for p in session.get('participants') or []
+            if isinstance(p, dict) and str(p.get('type') or '').lower() not in ('ai', 'ai_agent')
+        }
+        times = [parsed(m.get('timestamp')) for m in session.get('messages') or []
+                 if isinstance(m, dict) and m.get('sender') in humans]
+        return max([t for t in times + [parsed(session.get('started_at'))] if t], default=None)
+
+    @staticmethod
+    def _session_time_up(session: Dict[str, Any], now: Optional[datetime] = None) -> bool:
+        """Whether the session has run past its duration (UNTIMED_SESSION_PERIODIC_LIMIT_MINUTES if untimed)."""
+        try:
+            started = parse_iso_timestamp_utc(session.get('started_at'))
+        except (TypeError, ValueError):
+            return False
+        from services.annotation_service import is_maptask_untimed_annotation_session
+        minutes = (UNTIMED_SESSION_PERIODIC_LIMIT_MINUTES if is_maptask_untimed_annotation_session(session)
+                   else get_value_from_session_params(session, 'Session.Params.duration') or session.get('duration_minutes'))
+        try:
+            return bool(minutes) and ((now or datetime.now(timezone.utc)) - started).total_seconds() > float(minutes) * 60
+        except (TypeError, ValueError):
+            return False
+
+    @classmethod
+    def _periodic_check_allowed(cls, session: Dict[str, Any], now: Optional[datetime] = None) -> bool:
+        """Whether a periodic check may run: a human is still active and the session time has not run out.
+
+        `status` alone is not enough: a session nobody ended stays "running", and its
+        agent would otherwise check every 15-60 s with no one there.
+        """
+        now = now or datetime.now(timezone.utc)
+        last_active = cls._last_human_activity(session)
+        if last_active is None or (now - last_active).total_seconds() > PERIODIC_IDLE_STOP_SECONDS:
+            return False
+        return not cls._session_time_up(session, now)
+
+    def _maptask_guide_loop(self):
+        """Map Task Guide: a periodic check once the wait has passed since the last turn ended.
+
+        Partner messages wake the agent separately (`request_perception`); a
+        pending one takes precedence. A Follower agent leaves this loop.
+        """
+        def configured_window(session: Optional[Dict[str, Any]]) -> float:
+            value = get_value_from_session_params(session, 'Session.Interaction.agentPerceptionTimeWindow') if session else None
+            return float(value) if value is not None else DEFAULT_PERCEPTION_WINDOW_SECONDS
+
+        try:
+            window = configured_window(find_session_by_identifier(self.session_id)[1])
+        except Exception:
+            window = DEFAULT_PERCEPTION_WINDOW_SECONDS
+        while self.is_running:
+            time.sleep(1.0)
+            try:
+                if time.monotonic() - self._last_turn_ended_at < self._periodic_interval(window):
+                    continue
+                with self._message_trigger_lock:
+                    if self._message_trigger_timer is not None:
+                        continue
+                with self._perception_call_lock:
+                    session_key, session = find_session_by_identifier(self.session_id)
+                    if not session:
+                        print(f'[AgentRunner] Session {self.session_id} not found. Stopping agent.')
+                        self.is_running = False
+                        break
+                    participant = self._find_participant(session)
+                    if participant and str(participant.get('role') or '').lower() != 'guide':
+                        return
+                    if self._session_time_up(session):
+                        # The session is over: close the agent instead of idling (messages no longer wake it).
+                        print(f'[AgentRunner] Session {self.session_id} ran past its time limit. Stopping agent.')
+                        self.is_running = False
+                        break
+                    window = configured_window(session)
+                    ready = (session.get('status') == 'running' and participant is not None
+                             and self._periodic_check_allowed(session))
+                    if ready and time.monotonic() - self._last_turn_ended_at >= self._periodic_interval(window):
+                        self._perceive_and_act(session, session_key, trigger_context='periodic_check')
+                if not ready:
+                    time.sleep(4.0)
+            except Exception as e:
+                print(f'[AgentRunner] Error in Map Task Guide loop: {e}')
+                import traceback
+                traceback.print_exc()
+                time.sleep(5)
+
     def _perceive_and_act(
         self,
         session: Dict[str, Any],
@@ -203,6 +335,7 @@ class AgentRunner:
     ):
         """Perceive environment and generate/execute actions"""
         reply_status_active = False
+        self._turn_spoke = False
         try:
             try:
                 from services.realtime_session_config import session_includes_meeting_room
@@ -216,10 +349,26 @@ class AgentRunner:
                 print(f'[AgentRunner] Participant {self.participant_id} not found')
                 return
 
+            # The drawing and messages this turn is judged on; anything arriving while it runs belongs to the next turn.
+            is_maptask_guide = self.experiment_type == 'maptask' and str(participant.get('role') or '').lower() == 'guide'
+            # A Guide that cannot see the drawing judges only messages, so drawing changes are not "new".
+            turn_grid = (
+                follower_trajectory_grid_text(session)
+                if self.experiment_type == 'maptask' and (not is_maptask_guide or guide_sees_follower_drawing(session))
+                else ('' if is_maptask_guide else None)
+            )
+            turn_messages_seen = latest_visible_message_time(self.participant_id, session) if is_maptask_guide else None
+            changes = turn_changes(session, turn_grid, turn_messages_seen) if is_maptask_guide else None
+            # A periodic check runs even when nothing changed: waiting itself can call for a message.
+            if is_maptask_guide and trigger_context != 'periodic_check' and not changes['anything_new']:
+                print('[AgentRunner] No drawing or message change since the last judged turn; skipping')
+                return
+
             if should_publish_agent_reply_status(
                 experiment_type=self.experiment_type,
                 participant_role=participant.get('role'),
                 trigger_context=trigger_context,
+                partner_activity=bool(changes and changes.get('anything_new')),
             ):
                 emit_agent_reply_status(
                     session_id=str(session.get('session_id') or session_key),
@@ -262,27 +411,41 @@ class AgentRunner:
                 and str(participant.get('role') or '').lower() == 'follower'
             ):
                 prompt += '\n' + latest_visible_human_guide_message_context(self.participant_id, session)
-            if (
-                self.experiment_type == 'maptask'
-                and str(participant.get('role') or '').lower() == 'guide'
-            ):
+                failure = last_route_update_failure_context(self.participant_id, session)
+                if failure:
+                    prompt += '\n' + failure
+            # Wake-up reason and turn changes are perception shared by both Guides; grounding adds only detection, items, acts and repair.
+            if is_maptask_guide:
                 prompt += (
                     '\n<AGENT TRIGGER>\n'
                     + trigger_context
-                    + '\n</AGENT TRIGGER>'
+                    + '\n</AGENT TRIGGER>\n'
+                    + changes_block(changes)
                 )
-            elif (
+            is_follower_agent = (
                 self.experiment_type == 'maptask'
                 and str(participant.get('role') or '').lower() == 'follower'
-            ):
+            )
+            follower_grounding = is_follower_agent and self._uses_awareness_grounding_pipeline(participant, session)
+            if follower_grounding:
+                # The grounding Follower reads the whole conversation; it is told what the Guide can see.
+                follower_messages_seen = latest_visible_message_time(self.participant_id, session)
+                follower_changes = turn_changes(session, '', follower_messages_seen)
                 prompt += (
-                    '\n<FOLLOWER EVENT>\n'
+                    '\n' + follower_visibility_note(guide_sees_follower_drawing(session))
+                    + '\n' + changes_block(follower_changes)
+                )
+            elif is_follower_agent:
+                # Told what the Guide can see, as the grounding Follower is.
+                prompt += (
+                    '\n' + follower_visibility_note(guide_sees_follower_drawing(session))
+                    + '\n<FOLLOWER EVENT>\n'
                     'A new visible human Guide message triggered this decision. '
                     'Use only that newest instruction and your current Follower workspace.\n'
                     '</FOLLOWER EVENT>'
                 )
             trace_context = None
-            if self.experiment_type == 'maptask' and str(participant.get('role') or '').lower() == 'guide':
+            if self.experiment_type == 'maptask':
                 trace_context = TraceContext(
                     session_id=str(session.get('session_id') or self.session_id),
                     participant_id=self.participant_id,
@@ -295,16 +458,51 @@ class AgentRunner:
             # the existing Awareness Dashboard exposes follower map progress.
             selected_acts: list = []
             reply_images: list = []
-            if self._uses_awareness_grounding_pipeline(participant, session):
+            judged = False
+            uses_grounding = is_maptask_guide and self._uses_awareness_grounding_pipeline(participant, session)
+            if is_maptask_guide and not uses_grounding:
+                reply_images = self._plain_reply_images(session)
+            image_note = None
+            if is_follower_agent and getattr(self.llm_client, 'supports_multimodal_images', lambda: False)():
+                # Both Followers see their own map and drawing (the grounding one inside its pipeline).
+                reply_images, image_note = follower_image_parts(session), FOLLOWER_IMAGE_NOTE
+            if follower_grounding:
+                turn = safe_decide_follower(
+                    GroundingOrchestrator(self.llm_client), prompt, session=session, trace_context=trace_context,
+                )
+                if turn is None:
+                    print('[AgentRunner] Grounding Follower unavailable; using the plain Follower path')
+                else:
+                    self._run_grounding_follower_turn(session, session_key, turn, follower_messages_seen, follower_changes)
+                    return
+            if uses_grounding:
+                def announce_reply() -> None:
+                    # A waiting check that has decided to speak: from here until the message is sent.
+                    nonlocal reply_status_active
+                    if reply_status_active or not is_maptask_guide:
+                        return
+                    emit_agent_reply_status(
+                        session_id=str(session.get('session_id') or session_key),
+                        agent_participant_id=self.participant_id,
+                        active=True,
+                        trigger_context=trigger_context,
+                    )
+                    reply_status_active = True
+
                 decision = safe_decide(
                     GroundingOrchestrator(self.llm_client),
                     prompt,
                     session=session,
                     trace_context=trace_context,
+                    on_reply=announce_reply,
+                    # Same input as the last judgement: only the waiting time differs, so H/W are reused.
+                    reuse_detection=not changes['anything_new'],
                 )
                 if decision is None:
                     print('[AgentRunner] Grounding pipeline unavailable; using normal Guide reply path')
                 else:
+                    record_judged_turn(session, turn_grid, turn_messages_seen, changes)
+                    judged = True
                     self._record_grounding_decision(session, session_key, decision)
                     if decision.get('suppress_base_reply'):
                         print('[AgentRunner] trajectory verdict leaves current guidance unchanged')
@@ -318,8 +516,13 @@ class AgentRunner:
                         if results.get('successful'):
                             record_repair_attempt(
                                 session, decision.get('misalignment_item_id'), decision.get('r_codes'), reply,
+                                trajectory_grid=turn_grid,
                             )
-                            record_guide_message(session, decision.get('selected_acts'), reply)
+                            record_guide_message(
+                                session, decision.get('selected_acts'), reply,
+                                trajectory_grid=turn_grid, messages_seen_until=turn_messages_seen,
+                            )
+                            self._turn_spoke = True
                         repair_completion = decision.get('_trace_repair_completion')
                         if repair_completion:
                             record_trace_result(
@@ -335,13 +538,13 @@ class AgentRunner:
                         # The grounding decision chose a non-repair act; the
                         # normal Guide reply realizes it, with the maps for direction.
                         prompt += '\n' + decision['act_block']
-                        if getattr(self.llm_client, 'supports_multimodal_images', lambda: False)():
-                            reply_images = map_image_parts(session)
-                    if decision.get('normal_guide_action') == 'give_next_segment':
+                        reply_images = list(decision.get('_map_images') or [])
+                    elif decision.get('normal_guide_action') == 'give_next_segment':
+                        # Only on the fallback path: with an act block the decision already chose what to send.
                         prompt += (
                             '\n<GROUNDING HANDOFF>\n'
                             'The fresh Follower trajectory completed the active intended segment. '
-                            'Send the next executable route segment now. If acknowledgement is useful, phrase it naturally; '
+                            'Send the next executable route segment now, without repeating the completed one. If acknowledgement is useful, phrase it naturally; '
                             'do not expose an internal diagnostic verdict label.\n'
                             '</GROUNDING HANDOFF>'
                         )
@@ -361,12 +564,15 @@ class AgentRunner:
             
             # Call LLM to generate actions
             response, action_completion = self._call_llm(
-                prompt, participant, session, trace_context=trace_context, images=reply_images,
+                prompt, participant, session, trace_context=trace_context, images=reply_images, image_note=image_note,
             )
             
             if not response:
+                # A failed reply is retried by the next periodic check.
                 print(f'[AgentRunner] No response from LLM for participant {self.participant_id}')
                 return
+            if is_maptask_guide and not judged:
+                record_judged_turn(session, turn_grid, turn_messages_seen, changes)
             
             # Debug: Print LLM response
             participant_name = participant.get("name") or participant.get("participant_name")
@@ -393,13 +599,18 @@ class AgentRunner:
             results = self.protocol.execute_actions(actions)
             if action_completion:
                 record_trace_result(action_completion, {"actions": actions}, execution_result=results)
+            if is_maptask_follower and record_route_update_result(session, self.participant_id, results):
+                session_module.commit_session(session_key, session)
             if self.experiment_type == 'maptask' and str(participant.get('role') or '').lower() == 'guide':
                 sent = ' / '.join(
                     str((item.get('action') or {}).get('content') or '').strip()
                     for item in results.get('successful') or []
                     if isinstance(item, dict) and (item.get('action') or {}).get('type') == 'send_map_guidance'
                 )
-                record_guide_message(session, selected_acts, sent)
+                if record_guide_message(
+                    session, selected_acts, sent, trajectory_grid=turn_grid, messages_seen_until=turn_messages_seen,
+                ):
+                    self._turn_spoke = True
                 session_module.commit_session(session_key, session)
             
             # After actions are executed, re-fetch participant to get updated state (including read_essays)
@@ -426,6 +637,12 @@ class AgentRunner:
             import traceback
             traceback.print_exc()
         finally:
+            with self._message_trigger_lock:
+                self._last_turn_ended_at = time.monotonic()
+                if self._turn_spoke:
+                    self._quiet_periodic_turns = 0
+                elif trigger_context == 'periodic_check':
+                    self._quiet_periodic_turns += 1
             if reply_status_active:
                 try:
                     emit_agent_reply_status(
@@ -436,6 +653,14 @@ class AgentRunner:
                     )
                 except Exception as e:
                     print(f'[AgentRunner] Error clearing reply status: {e}')
+
+    def _plain_reply_images(self, session: Dict[str, Any]) -> list:
+        """Map images for the Map Task Guide's reply when the grounding treatment is not used."""
+        if not PLAIN_GUIDE_MAP_IMAGES:
+            return []
+        if not getattr(self.llm_client, 'supports_multimodal_images', lambda: False)():
+            return []
+        return map_image_parts(session)
 
     def request_perception(
         self,
@@ -458,6 +683,8 @@ class AgentRunner:
         with self._message_trigger_lock:
             if event_key and event_key in self._handled_event_keys:
                 return
+            # A partner event brings the periodic wait back to its base length.
+            self._quiet_periodic_turns = 0
             if event_key:
                 self._handled_event_keys.add(event_key)
             if self._message_trigger_timer is not None:
@@ -471,7 +698,17 @@ class AgentRunner:
             return False
         if (self.experiment_type or '').lower() != 'maptask':
             return False
-        if str(participant.get('role') or '').strip().lower() != 'guide':
+        role = str(participant.get('role') or '').strip().lower()
+        if role not in ('guide', 'follower'):
+            return False
+        # An explicit per-session switch wins, then the server default; with neither, the Awareness
+        # Dashboard rule (Guide only: a Follower agent has no such rule and stays plain).
+        explicit = get_value_from_session_params(session, 'Session.Interaction.groundingTreatment')
+        if isinstance(explicit, bool):
+            return explicit
+        if isinstance(GROUNDING_TREATMENT, bool):
+            return GROUNDING_TREATMENT
+        if role == 'follower':
             return False
         dashboard = get_value_from_session_params(session, 'Session.Interaction.awarenessDashboard')
         if not isinstance(dashboard, dict) or not dashboard.get('enabled'):
@@ -483,7 +720,8 @@ class AgentRunner:
         audit = session.setdefault('grounding_decisions', [])
         audit.append({
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            **{key: value for key, value in decision.items() if not key.startswith('_trace_')},
+            # Underscore keys are runtime-only (trace handles, map images) and stay out of the session.
+            **{key: value for key, value in decision.items() if not key.startswith('_')},
         })
         session_module.commit_session(session_key, session)
 
@@ -1556,7 +1794,12 @@ Response:"""
                     lines.append(f"  - {p_name}: {len(rankings)} ranked")
         
         # Other participants (based on awareness dashboard)
-        other_participants = perception.get('other_participants', [])
+        # A participant with nothing visible besides a name adds only an empty heading.
+        listed_participants = perception.get('other_participants', [])
+        other_participants = [
+            p for p in listed_participants
+            if any(key not in ('name', 'id') and value is not None for key, value in p.items())
+        ]
         if other_participants:
             lines.append("\n=== Other Participants (Awareness Dashboard) ===")
             for p in other_participants:
@@ -1589,7 +1832,7 @@ Response:"""
                             lines.append(f"  {key}: {json.dumps(value, indent=4)}")
                         else:
                             lines.append(f"  {key}: {value}")
-        else:
+        elif not listed_participants:
             lines.append("\n=== Other Participants ===")
             lines.append("  (Awareness Dashboard is disabled - no information available)")
         
@@ -1619,6 +1862,7 @@ Response:"""
         session: Optional[Dict[str, Any]] = None,
         trace_context: TraceContext | None = None,
         images: Optional[list] = None,
+        image_note: Optional[str] = None,
     ) -> tuple[Optional[str], Any | None]:
         """Call LLM to generate actions from the textual prompt evidence."""
         if not self.llm_client:
@@ -1630,8 +1874,12 @@ Response:"""
             # Use unified LLM client interface
             # Note: response_format is handled by the client implementation
             messages = [
-                {"role": "system", "content": "You are an AI agent participating in an economic experiment. Follow the instructions carefully and respond with valid JSON."},
-                {"role": "user", "content": grounding_user_content(prompt, images)}
+                {"role": "system", "content": (
+                    "You are an AI agent participating in a collaborative experiment. "
+                    if self.experiment_type == 'maptask' else
+                    "You are an AI agent participating in an economic experiment. "
+                ) + "Follow the instructions carefully and respond with valid JSON."},
+                {"role": "user", "content": grounding_user_content(prompt, images, image_note)}
             ]
             completion = None
             if trace_context is None:
@@ -1671,6 +1919,41 @@ Response:"""
             print(f'[AgentRunner] Response: {response[:200]}...')
             return []
 
+    def _run_grounding_follower_turn(
+        self, session: Dict[str, Any], session_key: str, turn: Dict[str, Any],
+        messages_seen: str, changes: Dict[str, Any],
+    ) -> None:
+        """Send the grounding Follower's turn: a drawing update with its message, or the message alone."""
+        record_judged_turn(session, '', messages_seen, changes)
+        self._record_grounding_decision(session, session_key, turn)
+        if turn.get('no_message'):
+            print('[AgentRunner] grounding Follower sends nothing this turn')
+            return
+        decision = (
+            {'decision': 'execute', 'source_message_id': '', 'keep_until': turn['keep_until'], 'add': turn['add'],
+             'message': turn['message']}
+            if turn.get('execute')
+            else {'decision': 'ask_clarification', 'question': turn['message']}
+        )
+        actions = self._follower_actions(decision, session)
+        if not actions:
+            print('[AgentRunner] grounding Follower turn had no deliverable action')
+            return
+        results = self.protocol.execute_actions(actions)
+        record_route_update_result(session, self.participant_id, results)
+        message = actions[0]['content']
+        if results.get('successful'):
+            if turn.get('for_repair'):
+                record_repair_attempt(session, turn.get('misalignment_item_id'), turn.get('r_codes'), message,
+                                      trajectory_grid='')
+            record_guide_message(
+                session, turn.get('selected_acts'), message, trajectory_grid='',
+                messages_seen_until=messages_seen,
+                route_edit={'keep_until': turn['keep_until'], 'add': turn['add']} if turn.get('execute') else {},
+            )
+        session_module.commit_session(session_key, session)
+        print(f"[AgentRunner] grounding Follower sent {len(results.get('successful', []))} action(s)")
+
     def _follower_actions_from_decision(
         self, response: str, participant: Dict[str, Any], session: Dict[str, Any]
     ) -> list[Dict[str, Any]]:
@@ -1678,6 +1961,10 @@ Response:"""
         decision = parse_follower_action_decision(response)
         if not decision:
             return []
+        return self._follower_actions(decision, session)
+
+    def _follower_actions(self, decision: Dict[str, Any], session: Dict[str, Any]) -> list[Dict[str, Any]]:
+        """One public Follower action: a route update bound to the Guide's newest message, or a message."""
         guide = next(
             (
                 p for p in (session.get('participants') or [])
@@ -1691,6 +1978,8 @@ Response:"""
         if not recipient:
             return []
         if decision['decision'] == 'ask_clarification':
+            if not decision['question']:
+                return []
             return [{'type': 'message', 'recipient': recipient, 'content': decision['question']}]
 
         latest_message_id = next(
@@ -1702,12 +1991,13 @@ Response:"""
             ),
             '',
         )
-        source_message_id = decision['source_message_id'] or latest_message_id
+        source_message_id = decision.get('source_message_id') or latest_message_id
         if not source_message_id:
             return []
         key_data = {
             'source_message_id': source_message_id,
-            'path_points': decision['path_points'],
+            'keep_until': decision['keep_until'],
+            'add': decision['add'],
         }
         idempotency_key = hashlib.sha256(
             json.dumps(key_data, separators=(',', ':'), sort_keys=True).encode('utf-8')
@@ -1716,7 +2006,8 @@ Response:"""
             'type': 'send_follower_update',
             'content': decision['message'] or 'Route updated.',
             'source_message_id': source_message_id,
-            'path_points': decision['path_points'],
+            'keep_until': decision['keep_until'],
+            'add': decision['add'],
             'idempotency_key': idempotency_key,
         }]
     

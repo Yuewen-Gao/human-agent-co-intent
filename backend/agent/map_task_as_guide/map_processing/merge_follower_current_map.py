@@ -145,10 +145,19 @@ def build_follower_current_workspace_context(
     rows, cols = merged["grid_size"]
     overlap_summary = merged["trace_landmark_overlaps"] or "none"
     landmarks_text = "\n".join(merged["landmark_summaries"])
+    start = follower_map.get("start_cell")
+    start_text = (
+        f"({start[0]}, {start[1]})"
+        if isinstance(start, list) and len(start) == 2
+        and all(isinstance(v, int) for v in start)
+        and 0 <= start[0] < rows and 0 <= start[1] < cols
+        else "unknown"
+    )
     return (
         "<FOLLOWER CURRENT WORKSPACE>\n"
         "coordinate_system: follower map only; do not compare coordinates directly with the Guide map\n"
         f"grid_size: {rows} rows x {cols} columns\n"
+        f"start: {start_text} (the START mark on your map)\n"
         "legend: . = empty, # = follower landmark, x = follower trajectory, "
         "! = follower trajectory overlaps a landmark cell\n"
         "landmarks:\n"

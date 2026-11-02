@@ -15,7 +15,7 @@ _CODEBOOK_DIR = (
 def definitions_for(family: str) -> str:
     """Return one code family without references or bibliographic metadata."""
     normalized = str(family or "").strip().upper()
-    if normalized not in {"H", "W", "R", "M", "O", "C"}:
+    if normalized not in {"H", "W", "R", "M", "O", "C", "E"}:
         raise ValueError(f"unknown codebook family: {family}")
     return (_CODEBOOK_DIR / f"{normalized}_definitions.txt").read_text(encoding="utf-8").strip()
 

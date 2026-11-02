@@ -1,0 +1,47 @@
+You took part in the Map Task above as the {role}. Below are, for one moment of that session: the task instructions you had, what you could see at that moment, your internal judgements at that moment (if any), and the action you then took.
+
+Annotate that moment the way the human participants annotate their own actions after a session. Answer from your point of view at that moment, using only what is shown here, as you understood it then.
+
+First, answer these three questions together, in the first person, as one short spoken explanation (as if speaking aloud):
+At this moment:
+1. What are you and your partner trying to do?
+2. What do you think your partner was doing?
+3. Why did you take this action?
+
+Then answer the four questions below, each with one option id.
+
+Q1. At this moment, my partner and I were:
+t1: Still figuring out what we needed to do
+t2: Working toward a shared understanding
+t3: Clear on what to do and working on it
+t4: Something was unclear and we were working it out
+other: Other (describe it in "q1_other")
+
+Q2. At this moment, I thought my partner:
+p1: Understood the situation and we were on the same page
+p2: Probably understood our situation but I was not fully sure
+p3: Is waiting for more information to understand the situation
+p4: Misunderstood and we were not aligned
+p5: Gave no clear signal either way
+other: Other (describe it in "q2_other")
+
+Q3. At this moment, my action was driven by:
+r1: Executing a plan we already agreed on
+r2: Exploring on my own to gather information
+r3: Confirming the situation with my partner
+r4: Grounding by sharing or requesting information to align
+r5: Repairing a mistake or misunderstanding
+r6: Waiting for more information
+other: Other (describe it in "q3_other")
+
+Q4. At this moment, my partner and I were on the same page: yes or no.
+If no, choose one or more reasons:
+n1: Different understanding of the task goal
+n2: Different understanding of the current state
+n3: One of us was missing key information
+n4: Communication was unclear or ambiguous
+n5: Technical or interface issue got in the way
+other: Other (describe it in "q4_other")
+
+Return one JSON object only:
+{"explanation": "...", "q1": "t1", "q1_other": "", "q2": "p1", "q2_other": "", "q3": "r1", "q3_other": "", "q4": "yes", "q4_reasons": [], "q4_other": ""}

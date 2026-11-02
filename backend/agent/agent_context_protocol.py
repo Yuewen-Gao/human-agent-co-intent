@@ -1909,12 +1909,18 @@ def _execute_send_follower_update_maptask(
     if idempotency_key in participant_keys:
         return {'success': True, 'action': action, 'idempotent': True}
 
-    from agent.map_task_as_follower.trajectory_snapshot import apply_route_update
+    from agent.map_task_as_follower.trajectory_snapshot import apply_route_edit, apply_route_update
+    from agent.map_task_as_guide.agent_session_context import follower_grid_path
     params = participant.get('experiment_params')
     params = params if isinstance(params, dict) else {}
     current_progress = params.get('map_progress')
     try:
-        updated_progress, snapshot = apply_route_update(current_progress, action.get('path_points'))
+        # A route edit keeps the first `keep_until` points and adds new ones; `path_points` replaces the route.
+        updated_progress, snapshot = (
+            apply_route_edit(current_progress, action.get('keep_until'), action.get('add'), follower_grid_path(session))
+            if 'keep_until' in action
+            else apply_route_update(current_progress, action.get('path_points'), follower_grid_path(session))
+        )
     except ValueError as error:
         return {'success': False, 'action': action, 'error': str(error)}
 
@@ -1945,7 +1951,8 @@ def _execute_send_follower_update_maptask(
         'follower_route_update': {
             'source_message_id': source_message_id,
             'idempotency_key': idempotency_key,
-            'path_points': action.get('path_points'),
+            **({'keep_until': action.get('keep_until'), 'add': action.get('add')}
+               if 'keep_until' in action else {'path_points': action.get('path_points')}),
         },
     }
     participant['experiment_params'] = {**params, 'map_progress': updated_progress}
@@ -1971,7 +1978,7 @@ def _execute_send_follower_update_maptask(
         'success': True,
         'action': action,
         'message_id': message['id'],
-        'new_cell_count': len(action.get('path_points') or []),
+        'new_cell_count': len(action.get('add') or action.get('path_points') or []),
         'recipient': recipient.get('name') or recipient.get('participant_name'),
     }
 

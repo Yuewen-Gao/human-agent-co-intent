@@ -5,8 +5,7 @@ from typing import Any
 
 
 VISIBLE_AGENT_REPLY_TRIGGERS = frozenset({
-    "follower_message",
-    "follower_trajectory_changed",
+    "partner_message",
 })
 
 
@@ -15,19 +14,20 @@ def should_publish_agent_reply_status(
     experiment_type: str | None,
     participant_role: str | None,
     trigger_context: str | None,
+    partner_activity: bool = False,
 ) -> bool:
-    """Return whether this request represents a user-visible AI reply."""
-    return (
-        str(experiment_type or "").lower() == "maptask"
-        and str(trigger_context or "") in VISIBLE_AGENT_REPLY_TRIGGERS
-        and (
-            str(participant_role or "").lower() == "guide"
-            or (
-                str(participant_role or "").lower() == "follower"
-                and str(trigger_context or "") == "follower_message"
-            )
-        )
-    )
+    """Return whether this turn answers the partner, so the room is told the agent is replying.
+
+    A partner message wakes a reply; for the Guide, so does a scheduled check that finds new
+    partner work (a drawing change it can see). A check that finds nothing new is announced
+    only once it decides to speak (see `AgentRunner._perceive_and_act`).
+    """
+    if str(experiment_type or "").lower() != "maptask":
+        return False
+    role, trigger = str(participant_role or "").lower(), str(trigger_context or "")
+    if trigger in VISIBLE_AGENT_REPLY_TRIGGERS:
+        return role in ("guide", "follower")
+    return role == "guide" and trigger == "periodic_check" and partner_activity
 
 
 def emit_agent_reply_status(

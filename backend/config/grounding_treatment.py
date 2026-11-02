@@ -8,6 +8,14 @@ from __future__ import annotations
 
 ENABLE_GROUNDING_TREATMENT = True
 MAPTASK_AGENT_ROLE = "guide"
+# Map Task Guide without the grounding treatment: also send the two map images
+# (Guide map, Follower map + drawing) with the normal reply.
+PLAIN_GUIDE_MAP_IMAGES = True
+# Defaults when a session does not set them (the session's own value still wins).
+GUIDE_SEES_FOLLOWER_DRAWING = False  # C2: the Guide (human or agent) sees the Follower's drawing (False: C1)
+# For the agent in MAPTASK_AGENT_ROLE. True: grounding agent; False: plain agent;
+# None: Awareness Dashboard rule (Guide only; a Follower agent then stays plain).
+GROUNDING_TREATMENT = True
 
 
 

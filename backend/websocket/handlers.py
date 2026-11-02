@@ -4,10 +4,67 @@ WebSocket handlers for real-time communication
 from flask import request
 from flask_socketio import emit, join_room, leave_room
 from datetime import datetime
+import threading
 import uuid
 
 # Store active connections (session_id -> set of socket_ids)
 active_connections = {}
+# Human participant pages per session (session_id -> set of socket_ids); researcher pages do not count.
+participant_connections = {}
+_stop_timers = {}
+_presence_lock = threading.Lock()
+# A session's agents stop once no participant page has been open for this long (covers a page refresh).
+PARTICIPANT_LEAVE_GRACE_SECONDS = 60.0
+
+
+def _find_session(room_id):
+    import routes.session as session_module
+    for key, session in session_module.sessions.items():
+        if session.get('session_id') == room_id or key == room_id:
+            return key, session
+    return None, None
+
+
+def participant_joined(room_id, sid):
+    """A participant page is open: its session's agents run."""
+    with _presence_lock:
+        participant_connections.setdefault(room_id, set()).add(sid)
+        timer = _stop_timers.pop(room_id, None)
+    if timer:
+        timer.cancel()
+    key, session = _find_session(room_id)
+    if session is not None:
+        import routes.session as session_module
+        session_module.start_session_agent_runners(key, session)
+
+
+def participant_left(sid, room_id=None):
+    """After the last participant page of a session closes, stop its agents once the grace period passes."""
+    with _presence_lock:
+        rooms = [room_id] if room_id else [r for r, sids in participant_connections.items() if sid in sids]
+        for room in rooms:
+            sids = participant_connections.get(room)
+            if not sids or sid not in sids:
+                continue
+            sids.discard(sid)
+            if sids:
+                continue
+            del participant_connections[room]
+            timer = threading.Timer(PARTICIPANT_LEAVE_GRACE_SECONDS, _stop_if_no_participant, args=(room,))
+            timer.daemon = True
+            _stop_timers[room] = timer
+            timer.start()
+
+
+def _stop_if_no_participant(room_id):
+    with _presence_lock:
+        _stop_timers.pop(room_id, None)
+        if participant_connections.get(room_id):
+            return
+    key, session = _find_session(room_id)
+    if session is not None:
+        import routes.session as session_module
+        session_module.stop_session_agent_runners(session, key)
 
 # IMPORTANT:
 # Do NOT import `socketio` from app.py here.
@@ -49,6 +106,7 @@ def register_handlers(socketio):
                 if not connections:
                     del active_connections[session_id]
                 break
+        participant_left(request.sid)
 
     @socketio.on('join_session')
     def handle_join_session(data):
@@ -97,6 +155,8 @@ def register_handlers(socketio):
             active_connections[room_id].add(request.sid)
             
             print(f'Client {request.sid} joined session room {room_id} (provided: {session_identifier}, role: {role})')
+            if role == 'participant':
+                participant_joined(room_id, request.sid)
             
             # Notify the client
             emit('joined_session', {
@@ -161,7 +221,8 @@ def register_handlers(socketio):
                 active_connections[room_id].discard(request.sid)
                 if not active_connections[room_id]:
                     del active_connections[room_id]
-            
+            participant_left(request.sid, room_id)
+
             print(f'Client {request.sid} left session room {room_id} (provided: {session_identifier})')
             
             # Notify the client
@@ -403,7 +464,7 @@ def register_handlers(socketio):
                         if runner:
                             runner.request_perception(
                                 event_key=f"message:{message['id']}",
-                                trigger_context='follower_message',
+                                trigger_context='partner_message',
                             )
 
             # Action log (human only gets screenshot/html_snapshot)

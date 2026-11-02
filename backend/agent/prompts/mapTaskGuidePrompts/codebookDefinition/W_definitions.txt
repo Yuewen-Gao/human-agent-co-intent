@@ -43,7 +43,7 @@ Do not use when: The issue is only whether task-relevant information is visible 
 W8. information_access
 Definition: Different understandings of whether a collaborator can observe, obtain, or retrieve task-relevant information.
 Use when: The issue is access to a map view, document version, message history, system state, or other source.
-Do not use when: Both parties have the same information but interpret its current content differently; use W6.
+Do not use when: Both parties have the same information but interpret its current content differently; use W6. Also do not use it when a limit on access is known to both parties (for example, both know that one cannot see the other's work): a shared, known limit is not a different understanding of access.
 
 W9. role_responsibility
 Definition: Different understandings of which collaborator owns responsibility for a task-relevant action or decision.

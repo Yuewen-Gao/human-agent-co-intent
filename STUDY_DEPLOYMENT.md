@@ -1,0 +1,116 @@
+# Map Task Study: Deployment Handover
+
+For whoever deploys the study site: how to set the conditions, which APIs to configure, where each session's data is stored, and how to export it. Current as of 2026-11-02 (map set H2).
+
+## 1. Study setup
+
+Each session pairs one human participant with one AI agent on the Map Task, text chat only. Two things are fixed and two are switched.
+
+- **Fixed:** visibility condition **C1** (the Guide cannot see the Follower's drawing), with the **Awareness Dashboard off**.
+- **Fixed:** map set `H2` (images `backend/map_assets/H2_*.png`, grids `backend/map_grids/H2_*.json`).
+- **Switched:** whether the agent is the **Guide or the Follower**, and whether it is the **grounding or the plain** agent.
+
+| Condition | `MAPTASK_AGENT_ROLE` | `GROUNDING_TREATMENT` | Human plays |
+| --- | --- | --- | --- |
+| Agent Guide, grounding | `"guide"` | `True` | Follower |
+| Agent Guide, plain | `"guide"` | `False` | Follower |
+| Agent Follower, grounding | `"follower"` | `True` | Guide |
+| Agent Follower, plain | `"follower"` | `False` | Guide |
+
+## 2. Must do before deploying
+
+- [x] **Awareness Dashboard off.** Done in the code: the public session template, `backend/services/public_session_template.py`, sets `"awarenessDashboard": {"enabled": False, "items": []}`. Keep it off: with it on, a human Guide sees the Follower's drawing in the Info Dashboard, which breaks C1.
+- [ ] **Turn on the LLM trace log:** set `LLM_TRACE_LOGGING=1` in `backend/.env`. It is off by default; without it there is no `llm_requests.jsonl`, and the agent's post-session annotation cannot be generated.
+- [ ] **Keep and back up `backend/logs/`.** The LLM trace and the agent's annotations exist only there, not in the database. Docker mounts it to the host as `./backend/logs:/app/logs`.
+- [ ] **Leave `GUIDE_SEES_FOLLOWER_DRAWING = False`** in `backend/config/grounding_treatment.py`. This is the agent side of C1.
+
+## 3. Switching conditions
+
+The condition is a server-wide setting in `backend/config/grounding_treatment.py`; change it and rebuild the backend.
+
+```python
+ENABLE_GROUNDING_TREATMENT = True     # keep True
+MAPTASK_AGENT_ROLE = "guide"          # "guide" or "follower": the agent's role; the human gets the other
+GUIDE_SEES_FOLLOWER_DRAWING = False   # C1, fixed
+GROUNDING_TREATMENT = True            # True: grounding agent; False: plain agent
+```
+
+```bash
+docker compose up -d --build backend
+```
+
+- The setting applies to every new session on that server, so only one condition runs at a time. Run conditions in blocks, or deploy one instance per condition.
+- When the human joins a session, the server assigns roles from `MAPTASK_AGENT_ROLE`.
+- A single session can override grounding on or off with `interaction.groundingTreatment` (a boolean); the role can only be set on the server.
+- The map set is `ACTIVE_MAP_SET = "H2"` in `backend/config/map_sets.py`. Do not change it.
+
+## 4. APIs and environment variables
+
+All go in `backend/.env`, which Docker reads through `env_file`. Never commit keys to the repository.
+
+| Purpose | Variables | Notes |
+| --- | --- | --- |
+| Agent model | `LLM_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL=gpt-5.6-sol` | Official OpenAI API. `OPENAI_REASONING_EFFORT` is optional (unset = model default); `OPENAI_BASE_URL` is normally unset. The agent-annotation script uses the same settings. |
+| Speech transcription (spoken post-session rationale, in-session checkpoints) | `OPENAI_API_KEY` | Uses OpenAI `whisper-1`. Azure also works: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_WHISPER_DEPLOYMENT`, `AZURE_OPENAI_API_VERSION`; when set, Azure is used first. |
+| Database | `DATABASE_URL` (or `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`), `PGSCHEMA` | PostgreSQL. Defaults to the Postgres bundled in docker compose; set `DATABASE_URL` for an external one such as RDS. `PGSCHEMA` defaults to `humanagent_collab`. |
+| LLM trace log | `LLM_TRACE_LOGGING=1` | Required; see section 2. |
+| Flask session key | `FLASK_SECRET_KEY` | Set a random string, not the default. |
+| Screenshots in S3 (optional) | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET` | Action screenshots and page snapshots for annotation. Without S3 they stay in `backend/logs/<session_id>/files/`. |
+
+## 5. Deployment
+
+The study needs both a database and the local `backend/logs/` folder: the database holds actions, sessions and annotations; the folder holds the LLM trace and the agent's annotations.
+
+```bash
+# All in one: bundled Postgres + backend + frontend
+docker compose up -d --build
+
+# External database (e.g. AWS RDS), with DATABASE_URL in .env
+docker compose -f docker-compose.rds.yml --env-file .env up --build
+```
+
+Ports: backend `${BACKEND_PORT:-5001}` → container 5000; frontend `${FRONTEND_PORT:-8080}` → container 80.
+
+## 6. Data each session produces
+
+Files are under `backend/logs/<session_id>/`.
+
+| Data | Database table | File |
+| --- | --- | --- |
+| Every action: message, draw, erase, undo, reset (human and agent) | `action_logs` | `<participant_id>.jsonl` |
+| Session configuration (condition, maps, participants) | `research_sessions` | — |
+| In-session spoken checkpoints (25% / 50% / 75%) | `in_session_annotations` | database only |
+| Human post-session annotation (spoken rationale + Q1–Q4) | `post_session_annotations` | `post_annotations_<participant_id>.json` |
+| Action screenshots and page snapshots | — | `files/` (or S3) |
+| Every agent LLM call (request, response, intermediate judgements) | — | `llm_requests.jsonl` (needs `LLM_TRACE_LOGGING=1`) |
+| Agent post-session annotation (offline script, same format as the human's) | — | `post_annotations_agent.json` |
+
+## 7. After each session
+
+Run these three steps once the human participant has finished their post-session annotation.
+
+1. **Generate the agent's post-session annotation.** Run with `--dry-run` first to see how many actions it will annotate, without any model call. The real run makes one model call per action, about 15–40 per session. It annotates only actions the agent actually took, so 15-second checks that sent nothing are skipped. A rerun skips actions already annotated.
+
+    ```bash
+    docker compose exec backend python -m scripts.annotate_agent_actions --session-id <session_id> --dry-run
+    docker compose exec backend python -m scripts.annotate_agent_actions --session-id <session_id>
+    ```
+
+2. **Export.** Output goes to `backend/exports/`: `<name>_<first 8 of id>_user_actions.json` (all human actions) and `<name>_<first 8 of id>_actions_and_annotations.json` (actions and annotations: human in `post_session_annotations`, agent in `agent_post_session_annotations`, checkpoints in `in_session_annotations_all`).
+
+    ```bash
+    docker compose exec backend python -m scripts.export_session_data --session-id <session_id>
+    # or by name: --session-name "<session name>"
+    ```
+
+3. **Back up the raw folder.** Copy the whole `backend/logs/<session_id>/`. The export does not include `llm_requests.jsonl`; that file exists only here.
+
+Each post-session annotation has the same fields for human and agent, matching the ALMANAC data:
+
+| Field | Meaning |
+| --- | --- |
+| `explanation_transcription` | Spoken rationale (transcribed) |
+| `task_model_q1` | Q1 team goal |
+| `partner_model_q2` | Q2 partner intent |
+| `self_model_q3` | Q3 self-reasoning |
+| `alignment_q4` | Q4 on the same page: yes / no |

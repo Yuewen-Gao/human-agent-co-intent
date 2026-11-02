@@ -91,7 +91,8 @@ def apply_maptask_ai_role_switch(found_session) -> None:
         if not isinstance(progress, dict) or progress.get('agent_follower_dashboard_snapshot'):
             continue
         from agent.map_task_as_follower.trajectory_snapshot import ensure_dashboard_snapshot
-        params['map_progress'] = ensure_dashboard_snapshot(progress)
+        from agent.map_task_as_guide.agent_session_context import follower_grid_path
+        params['map_progress'] = ensure_dashboard_snapshot(progress, follower_grid_path(found_session))
 
 
 def _register_participant_agent_runner(found_session, session_key, participant) -> bool:
@@ -824,6 +825,8 @@ def update_participant_experiment_params(participant, session):
     exp_cfg = get_experiment_by_id(experiment_id) or {}
     interface_cfg = exp_cfg.get('interface', None)
     if isinstance(interface_cfg, dict):
+        from agent.map_task_as_guide.agent_session_context import guide_sees_follower_drawing
+
         ui_cfg = copy.deepcopy(interface_cfg)
 
         # For each panel group -> list of panel configs
@@ -853,6 +856,11 @@ def update_participant_experiment_params(participant, session):
 
                         # binding-level visibility
                         if not _eval_visible_if(b.get('visible_if', True), session, participant):
+                            continue
+                        # C1: the Map Task Guide (human or agent) does not see the Follower's drawing.
+                        if (b.get('path') == 'Participant.map_progress'
+                                and str(session.get('experiment_type') or '').lower() == 'maptask'
+                                and not guide_sees_follower_drawing(session)):
                             continue
                         if 'visible_if' in b:
                             b['visible_if'] = True
@@ -1668,7 +1676,6 @@ def update_map_progress(session_identifier, participant_id):
 
         if 'experiment_params' not in participant:
             participant['experiment_params'] = {}
-        previous_progress = participant['experiment_params'].get('map_progress')
         participant['experiment_params']['map_progress'] = map_progress
 
         session_module.commit_session(session_key, found_session)
@@ -1681,28 +1688,7 @@ def update_map_progress(session_identifier, participant_id):
             update_type='partial'
         )
 
-        # Wake the Guide only when the follower's actual drawing changed.
-        from agent.map_task_as_guide.event_trigger import follower_trajectory_event_key
-        previous_key = follower_trajectory_event_key(previous_progress or {})
-        event_key = follower_trajectory_event_key(map_progress)
-        if event_key and event_key != previous_key:
-            from agent.agent_runner import get_agent_runner
-            for candidate in participants_list:
-                candidate_id = candidate.get('id') or candidate.get('participant_id')
-                candidate_role = str(candidate.get('role') or '').lower()
-                candidate_type = str(candidate.get('type') or '').lower()
-                if (
-                    candidate_id
-                    and candidate_role == 'guide'
-                    and candidate_type in ('ai', 'ai_agent')
-                ):
-                    runner = get_agent_runner(candidate_id, broadcast_session_id)
-                    if runner:
-                        runner.request_perception(
-                            event_key=event_key,
-                            trigger_context='follower_trajectory_changed',
-                        )
-
+        # The drawing does not wake the Guide: its periodic check sees it when visible.
         return jsonify({'success': True, 'map_progress': map_progress}), 200
 
     except Exception as e:

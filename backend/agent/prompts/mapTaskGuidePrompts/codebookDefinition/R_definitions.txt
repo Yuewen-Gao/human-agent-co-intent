@@ -5,12 +5,10 @@ Code the strategy used to repair the episode. A response may sequence multiple s
 R1. open_request
 Group: Initiation (R1-R3): opens repair by requesting clarification or offering a candidate for evaluation.
 Definition: Signals possible misunderstanding but leaves the trouble source unspecified.
-System action: Ask for general clarification.
 
 R2. restricted_request
 Group: Initiation (R1-R3): opens repair by requesting clarification or offering a candidate for evaluation.
 Definition: Requests clarification of a specific missing or ambiguous component.
-System action: Ask a bounded question, such as whether the route is left or right of a landmark.
 
 R3. restricted_offer
 Group: Initiation (R1-R3): opens repair by requesting clarification or offering a candidate for evaluation.
@@ -20,7 +18,6 @@ Do not use when: Only checking uptake of an established repair; use R7.
 R4. refashioning
 Group: Resolution (R4-R6): supplies a repaired formulation, suggestion, or added detail.
 Definition: Replaces the problematic referring expression or description with a newly formulated one.
-System action: Rephrase an ambiguous description using a different expression.
 
 R5. suggestion
 Group: Resolution (R4-R6): supplies a repaired formulation, suggestion, or added detail.

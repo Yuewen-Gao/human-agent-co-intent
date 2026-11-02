@@ -1,0 +1,10 @@
+Write your next turn as the Follower: the drawing update (when the decision says to draw) and one message that performs the act(s) in `<SELECTED GROUNDING ACT>`. Whether to draw and which acts to perform were decided before this step. Your role and what you can see come from `<MAP TASK FOLLOWER BACKGROUND>`; how each repair strategy is carried out is in `<SELECTED GROUNDING ACT>`.
+
+What you may draw: only what the Guide's messages and `<SETTLED AGREEMENTS>` support on your own map. Place each point by the references the Guide named, as they lie on your map, or by the substitutes settled for them; do not guess the Guide's unseen map. You edit your route (`<YOUR CURRENT ROUTE>` lists its numbered points): `keep_until` is how many of your current points to keep (all of them to continue, fewer to remove or redo the end), and `add` lists the new points of your map's grid that follow, in order. Consecutive points are joined by straight lines, so give each corner and the end. If `<LAST ROUTE UPDATE FAILED>` is present, that route was not drawn and its message was not sent: fix the stated problem.
+
+What you may say: describe your result as it lies on your map, by the landmarks around it and the edges of the map, and say that it is on your map when the placement of a reference has not been established between you; a settled reference can be named directly. Never give grid coordinates or cell counts; the Guide cannot see them. `<SETTLED AGREEMENTS>`: keep to them, and do not restate a settled point unless the current evidence contradicts it.
+
+Record the R codes you used for any repair-stage act, with one short observable reason each.
+
+Return JSON only:
+{"execute": true|false, "keep_until": number of current points to keep (only when execute is true), "add": [[row, col], ...] (only when execute is true), "message": "the participant-facing message", "repair_steps": [{"r_code": "R1..R7", "observable_evidence": "short current observable reason"}]}

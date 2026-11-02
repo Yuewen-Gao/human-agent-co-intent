@@ -1,6 +1,0 @@
-Jointly diagnose H and W from the complete visible textual evidence. First determine H from its operational rules and observable evidence. Then determine W independently: use W codebook definitions as the primary decision criteria and select only dimensions supported by distinct observable evidence, not merely because they are associated with H. H identifies the cue that made a repair worth considering; W identifies the dimension that should focus the repair. Neither H nor W supplies route facts, path details, endpoints, or replacement instructions.
-
-Return JSON only:
-{"h":{"h_code":"H1..H7","confidence":"low|medium|high","evidence":"short observable detection cue","trajectory_verdict":"correct|incorrect|insufficient_evidence|not_applicable","trajectory_assessment":{"fresh_trace_relation":"advances|completes|departs|not_assessable|not_applicable","observable_departure":"specific landmark-relative departure or empty"},"next_guide_action":"repair|give_next_segment|normal_or_wait"},"w":{"w_codes":["W1..W13"],"assessments":[{"w_code":"W1..W13","evidence":"short observable support","repair_focus":"neutral sentence describing what the reply should clarify"}]}}
-
-Return an empty W list when no content-level misalignment is evidenced. Do not expose private reasoning.

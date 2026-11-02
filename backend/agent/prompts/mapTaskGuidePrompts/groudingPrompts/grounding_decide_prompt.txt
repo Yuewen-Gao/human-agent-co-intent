@@ -1,24 +1,13 @@
-You maintain the Guide's open misalignment episodes and choose the grounding act(s) of the Guide's next message, in one decision.
+You maintain your open misalignment items and choose the grounding act(s) of your next message, in one decision. `<ROLE ACTS>` says how your role applies them.
 
 Reuse the judgements you are given instead of re-deriving them:
-- `<CURRENT DETECTION>` is this turn's independent H/W diagnosis. Its trajectory assessment (advances, completes, departs, not_assessable) is the judgement about the Follower's newest drawing: take it as given.
-- Each open item lists its repairs and its recent judgements from earlier turns. Build on them. Do not reopen something an earlier judgement settled unless new evidence contradicts it.
-- `<PREVIOUS GUIDE TURN>` is what the Guide last sent and what the Follower has drawn since. If that message gave a new instruction and the Follower has not acted on it yet, the earlier drawing is not a deviation from the new instruction. `<RECENTLY CLOSED ITEMS>` were settled earlier; reopen one only through step 2.
-- Do not compute exact target positions. Describe positions only by relations to visible landmarks.
+- Each open item lists its current evidence strength, its repairs, and its recent judgements from earlier turns. Build on them. Do not reopen something an earlier judgement settled unless new evidence contradicts it.
+- `<SETTLED AGREEMENTS>` is what closed items established. Keep to them in every act you choose.
+- Do not compute exact target positions. An item's description and resolution are carried into later messages: state positions in them only by relations to visible landmarks.
 
-Tolerance: the Follower cannot see the Guide's reference, so their result will rarely match it exactly. A difference matters only if it changes the task outcome: it changes the result's relation to a reference point or constraint, it changes where a step starts or ends so that later steps would go wrong, or the Follower is about to build on it. Other differences are acceptable imprecision, not misalignment.
+Step 1. For every open item, judge its evidence from the whole conversation and the new information, using `<EVIDENCE STRENGTH>`:
+- "strength": the strongest positive evidence so far that you and the partner hold the same repaired interpretation (E0–E4). A repair having been sent is not evidence; silence is not acceptance.
+- "evidence": name the strongest evidence type and what it showed.
+- "outcome" from the O codebook: O1 when the evidence is enough for current purposes, given how important this item is (see `<EVIDENCE STRENGTH>`), and no counter-evidence stands, with "resolution" stating in one sentence what both now share that settles the problem: the interpretation, map fact, or reference it rests on (for example, that a landmark is placed differently on the two maps and which reference replaces it), not the route steps that followed. Evidence that shows only that the partner received the repair (E2 or weaker, such as a bare acknowledgement) does not resolve the doubt that opened the item, so it is not enough for O1. O2 when the interaction has visibly moved on and the item is no longer pursued although it was not solved; O3 when both positions are explicit and mutually understood but still differ, with "resolution" stating both positions and what was agreed to do; otherwise O4.
 
-Step 1. For every open item, decide its Outcome from the O codebook:
-- O1 only with positive evidence from the Follower that the repaired interpretation is accepted, accurately restated, or acted on consistently. Acting on it with only acceptable imprecision counts as consistent_task_action.
-- O2 when the interaction has visibly moved on and the item is no longer pursued although it was not solved.
-- O3 when both positions are explicit and mutually understood but still differ.
-- O4 when the evidence is insufficient. For O4 also set "progress": "in_progress" if the newest drawing advances toward the repaired target without departing (per the H trajectory assessment), otherwise "no_evidence". A repair having been sent is not evidence of understanding; silence is not acceptance.
-
-Step 2. Relate the current detection to the open items and the recently closed items. Open items: "merge" when it concerns the same disputed proposition (even with different H or W codes), "new" for a different proposition (even on the same route segment). Recently closed items: "merge" when the problem is back in the same part of the task as that item (the same step, or the same place in the shared result), even if the specific target or wording has changed since; this reopens the item, because the earlier repairs on that part did not hold, and they still count. Use "none" only when the current H is H7.
-
-Step 3. Choose the act(s) of the next message from the results of steps 1 and 2; do not re-judge them.
-- An item that is in_progress needs no repair of an unfinished stroke: wait (no_message) or briefly acknowledge that the direction is right.
-- An unresolved item does not mean you must repair again: repair again only when there is new evidence that the problem persists.
-- If an item has already received three or more repairs and the problem persists, do not send another fine correction of the same kind; ask how the Follower understands the target (Request Repair), check with them (Request Acknowledge), or accept the result if the remaining difference would not change the task outcome.
-- "Am I right?", "Is this right?", or "Like this?" from the Follower is a request for confirmation of their result, not a question about direction.
-- If sending nothing now is best (for example, the Follower is still acting on your last message), return no_message instead of acts.
+Step 2. Relate the current detection to the open items and the recently closed items. Open items: "merge" only when the new cue concerns the same disputed proposition, that is, when one answer would settle both (even with different H or W codes). If settling the item would still leave the new cue open (it concerns a later step, a different target, or another property of the same step), it is "new". Keep each item's proposition as stated; do not widen it to absorb a new question. Recently closed items: "merge" only when the new cue concerns the same proposition as that item, by the same test (one answer would settle both); this reopens the item, because the earlier repair did not hold, and its repairs still count. A different question about the same part of the task is "new". Use "none" only when the current H is H7.

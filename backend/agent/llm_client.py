@@ -5,8 +5,36 @@ This module provides a unified interface for different LLM providers.
 """
 
 import os
+import threading
 from typing import Optional, Any, Dict
 from abc import ABC, abstractmethod
+
+# Total wall-clock limit for one OpenAI-compatible call (SDK retries included),
+# and the SDK's retry count. The SDK's own read timeout only bounds the gap
+# between received bytes, so a slow trickle could otherwise hold a turn for an hour.
+DEFAULT_OPENAI_TIMEOUT_SECONDS = 60.0
+DEFAULT_OPENAI_MAX_RETRIES = 1
+# Token usage of the latest OpenAI-compatible call made by this thread (read by experiment scripts for cost).
+_LAST_USAGE = threading.local()
+
+
+def last_usage() -> Optional[Dict[str, Any]]:
+    """Token usage of this thread's latest OpenAI-compatible call, or None."""
+    return getattr(_LAST_USAGE, "value", None)
+
+
+def _usage_dict(response: Any) -> Optional[Dict[str, Any]]:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return None
+    details = getattr(usage, "completion_tokens_details", None)
+    cached = getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", None)
+    return {
+        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+        "completion_tokens": getattr(usage, "completion_tokens", None),
+        "reasoning_tokens": getattr(details, "reasoning_tokens", None) if details is not None else None,
+        "cached_tokens": cached,
+    }
 
 
 def _openai_compatible_base_url(base_url: str) -> str:
@@ -15,6 +43,37 @@ def _openai_compatible_base_url(base_url: str) -> str:
     if not normalized.endswith("/v1"):
         normalized = f"{normalized}/v1"
     return normalized
+
+
+def _env_number(name: str, default: float, cast=float) -> Any:
+    try:
+        value = cast(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
+
+
+def _call_with_deadline(fn, seconds: float):
+    """Run ``fn`` in a daemon thread and give up after ``seconds``.
+
+    The abandoned call finishes in the background; its result is discarded.
+    """
+    outcome: Dict[str, Any] = {}
+
+    def run():
+        try:
+            outcome["value"] = fn()
+        except BaseException as error:  # re-raised in the caller's thread
+            outcome["error"] = error
+
+    worker = threading.Thread(target=run, daemon=True, name="llm-call")
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise TimeoutError(f"LLM call exceeded {seconds:g} s")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
 
 
 def _optional_positive_int(value: Any) -> Optional[int]:
@@ -69,10 +128,19 @@ class OpenAIClient(LLMClient):
         api_key: str,
         base_url: Optional[str] = None,
         default_model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
     ):
+        self.reasoning_effort = reasoning_effort
+        self.timeout_seconds = _env_number("OPENAI_TIMEOUT_SECONDS", DEFAULT_OPENAI_TIMEOUT_SECONDS)
+        self.max_retries = _env_number("OPENAI_MAX_RETRIES", DEFAULT_OPENAI_MAX_RETRIES, int)
         try:
-            from openai import OpenAI
-            client_kwargs = {"api_key": api_key}
+            from openai import OpenAI, Timeout
+            client_kwargs = {
+                "api_key": api_key,
+                # Per-attempt limits; the total deadline in chat_completions_create covers retries.
+                "timeout": Timeout(max(self.timeout_seconds - 10.0, 1.0), connect=5.0),
+                "max_retries": self.max_retries,
+            }
             if base_url:
                 client_kwargs["base_url"] = _openai_compatible_base_url(base_url)
             self.client = OpenAI(**client_kwargs)
@@ -89,6 +157,8 @@ class OpenAIClient(LLMClient):
         **kwargs
     ) -> str:
         model = model or self.default_model
+        if getattr(self, "reasoning_effort", None) and "reasoning_effort" not in kwargs:
+            kwargs["reasoning_effort"] = self.reasoning_effort
         request_kwargs = {
             "model": model,
             "messages": messages,
@@ -102,10 +172,11 @@ class OpenAIClient(LLMClient):
             token_field = "max_completion_tokens" if str(model).startswith("gpt-5") else "max_tokens"
             request_kwargs[token_field] = max_tokens
 
-        response = self.client.chat.completions.create(
-            **request_kwargs,
+        response = _call_with_deadline(
+            lambda: self.client.chat.completions.create(**request_kwargs),
+            getattr(self, "timeout_seconds", DEFAULT_OPENAI_TIMEOUT_SECONDS),
         )
-        
+        _LAST_USAGE.value = _usage_dict(response)
         return response.choices[0].message.content
 
 
@@ -283,6 +354,9 @@ def create_llm_client(config: Optional[Dict[str, Any]] = None) -> Optional[LLMCl
     - AZURE_OPENAI_DEPLOYMENT: Deployment name (e.g., "gpt-4o")
     - AZURE_OPENAI_API_VERSION: API version (default: "2024-12-01-preview")
     - OPENAI_API_KEY: OpenAI API key
+    - OPENAI_REASONING_EFFORT: optional reasoning effort for OpenAI reasoning models (unset: model default)
+    - OPENAI_TIMEOUT_SECONDS: total time limit per call, retries included (default 60)
+    - OPENAI_MAX_RETRIES: SDK retries per call (default 1)
     - DEEPSEEK_API_KEY: DeepSeek API key
     - DEEPSEEK_BASE_URL: DeepSeek OpenAI-compatible base URL
     - DEEPSEEK_MODEL: DeepSeek model name
@@ -337,10 +411,12 @@ def create_llm_client(config: Optional[Dict[str, Any]] = None) -> Optional[LLMCl
                 api_key = config.get('api_key')
                 base_url = config.get('base_url')
                 default_model = config.get('model')
+                reasoning_effort = config.get('reasoning_effort')
             else:
                 api_key = os.getenv('OPENAI_API_KEY')
                 base_url = os.getenv('OPENAI_BASE_URL')
                 default_model = os.getenv('OPENAI_MODEL')
+                reasoning_effort = os.getenv('OPENAI_REASONING_EFFORT')
             
             if not api_key:
                 print('[LLMClient] Warning: OPENAI_API_KEY not set. Using mock LLM.')
@@ -350,6 +426,7 @@ def create_llm_client(config: Optional[Dict[str, Any]] = None) -> Optional[LLMCl
                 api_key=api_key,
                 base_url=base_url,
                 default_model=default_model,
+                reasoning_effort=reasoning_effort or None,
             )
 
         elif provider == 'deepseek':

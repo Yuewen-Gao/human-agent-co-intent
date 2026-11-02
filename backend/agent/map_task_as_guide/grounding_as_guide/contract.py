@@ -11,9 +11,6 @@ VALID_R_CODES = frozenset(f"R{i}" for i in range(1, 8))
 VALID_TRAJECTORY_VERDICTS = frozenset({
     "correct", "incorrect", "insufficient_evidence", "not_applicable",
 })
-VALID_TRAJECTORY_RELATIONS = frozenset({
-    "advances", "completes", "departs", "not_assessable", "not_applicable",
-})
 
 
 def parse_json_object(raw: str) -> dict[str, Any]:
@@ -24,7 +21,9 @@ def parse_json_object(raw: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def parse_h(raw: str) -> dict[str, Any]:
+def parse_h(raw: str, role: str = "guide") -> dict[str, Any]:
+    """Validate an H diagnosis. The Follower makes no trajectory judgement: its H4 (the Guide reports
+    that its work departs from what was meant) stands without the trajectory fields."""
     value = parse_json_object(raw)
     code = value.get("h_code")
     if not isinstance(code, str) or code not in VALID_H_CODES:
@@ -37,8 +36,9 @@ def parse_h(raw: str) -> dict[str, Any]:
     trajectory_assessment = {
         "fresh_trace_relation": str(raw_assessment.get("fresh_trace_relation", "")).strip(),
         "observable_departure": str(raw_assessment.get("observable_departure", "")).strip(),
+        "instruction_conflict": str(raw_assessment.get("instruction_conflict", "")).strip(),
     }
-    if code == "H4" and (
+    if code == "H4" and role != "follower" and (
         trajectory_verdict != "incorrect"
         or trajectory_assessment["fresh_trace_relation"] != "departs"
         or not trajectory_assessment["observable_departure"]
@@ -98,16 +98,6 @@ def parse_w(raw: str) -> dict[str, Any]:
     }
 
 
-def parse_joint_diagnosis(raw: str) -> dict[str, Any]:
-    """Validate the joint H/W response without weakening either sub-contract."""
-    value = parse_json_object(raw)
-    h_raw = value.get("h")
-    w_raw = value.get("w")
-    h = parse_h(json.dumps(h_raw)) if isinstance(h_raw, dict) else {}
-    w = parse_w(json.dumps(w_raw)) if isinstance(w_raw, dict) else {}
-    return {"h": h, "w": w}
-
-
 def parse_repair(raw: str, *, allow_r7: bool = False) -> dict[str, Any]:
     """Validate R metadata plus its Map Task action-envelope reply.
 
@@ -153,14 +143,7 @@ def parse_repair(raw: str, *, allow_r7: bool = False) -> dict[str, Any]:
             ):
                 continue
             used_codes.add(code)
-            example_ids = raw_step.get("example_ids")
-            repair_steps.append({
-                "r_code": code,
-                "observable_evidence": evidence,
-                "example_ids": tuple(
-                    item for item in example_ids if isinstance(item, str) and item.strip()
-                ) if isinstance(example_ids, list) else (),
-            })
+            repair_steps.append({"r_code": code, "observable_evidence": evidence})
     codes = tuple(step["r_code"] for step in repair_steps)
     if not codes:
         raw_codes = value.get("applied_r_codes")
@@ -178,10 +161,6 @@ def parse_repair(raw: str, *, allow_r7: bool = False) -> dict[str, Any]:
         "r_code": codes[0],
         "applied_r_codes": codes,
         "repair_steps": tuple(repair_steps),
-        "deferred_r_codes": tuple(dict.fromkeys(
-            code for code in value.get("deferred_r_codes", [])
-            if isinstance(code, str) and code in VALID_R_CODES
-        )) if isinstance(value.get("deferred_r_codes", []), list) else (),
         "reply": reply,
         "adds_missing_detail": str(value.get("adds_missing_detail", "false")).lower() == "true",
         "selection_evidence": str(value.get("selection_evidence", "")).strip(),
@@ -189,9 +168,7 @@ def parse_repair(raw: str, *, allow_r7: bool = False) -> dict[str, Any]:
 
 
 VALID_OUTCOME_CODES = frozenset({"O1", "O2", "O3", "O4"})
-VALID_CLOSURE_EVIDENCE = frozenset({
-    "explicit_acknowledgement", "accurate_restatement", "consistent_task_action", "none_observed",
-})
+EVIDENCE_LEVELS = ("E0", "E1", "E2", "E3", "E4")
 VALID_DETECTION_ACTIONS = frozenset({"merge", "new", "none"})
 
 
@@ -201,29 +178,27 @@ def parse_reconciliation(
     """Validate the item-maintenance response against the currently open items.
 
     Unknown ids, invalid codes, and missing entries are dropped item by item;
-    an omitted item simply receives no outcome this turn. A detection may also
-    merge into one of ``closed_item_ids`` (recently closed items it reopens).
+    an omitted item simply receives no outcome this turn. A detection may also merge into one of
+    ``closed_item_ids`` (recently closed items it reopens).
     """
     value = parse_json_object(raw)
     raw_items = value.get("items")
-    outcomes: dict[str, dict[str, str]] = {}
+    outcomes: dict[str, dict[str, Any]] = {}
     if isinstance(raw_items, list):
         for raw_item in raw_items:
             if not isinstance(raw_item, dict):
                 continue
             item_id = raw_item.get("id")
             outcome = raw_item.get("outcome")
-            closure = raw_item.get("closure_evidence")
-            if (
-                isinstance(item_id, str) and item_id in open_item_ids and item_id not in outcomes
-                and outcome in VALID_OUTCOME_CODES
-                and closure in VALID_CLOSURE_EVIDENCE
-            ):
-                outcomes[item_id] = {
-                    "outcome": outcome,
-                    "closure_evidence": closure,
-                    "evidence": str(raw_item.get("evidence", "")).strip(),
-                }
+            if not (isinstance(item_id, str) and item_id in open_item_ids and item_id not in outcomes
+                    and outcome in VALID_OUTCOME_CODES):
+                continue
+            outcomes[item_id] = {
+                "outcome": outcome,
+                "strength": raw_item.get("strength") if raw_item.get("strength") in EVIDENCE_LEVELS else "",
+                "evidence": str(raw_item.get("evidence", "")).strip(),
+                "resolution": str(raw_item.get("resolution", "")).strip() if outcome in ("O1", "O3") else "",
+            }
     raw_detection = value.get("detection")
     raw_detection = raw_detection if isinstance(raw_detection, dict) else {}
     action = raw_detection.get("action")
@@ -241,7 +216,8 @@ def parse_reconciliation(
     return {"outcomes": outcomes, "detection": detection}
 
 
-VALID_PROGRESS = frozenset({"in_progress", "no_evidence", "not_applicable"})
+# Acts one message may perform: the decision gives one to three different acts.
+MAX_ACTS = 3
 VALID_STATES = frozenset({"no_issue", "specific_correctable", "missing_information", "instruction_invalidated"})
 
 
@@ -259,14 +235,16 @@ def parse_decision(
     """
     value = parse_json_object(raw)
     upkeep = parse_reconciliation(raw, open_item_ids, closed_item_ids)
-    for entry in value.get("items") or []:
-        if isinstance(entry, dict) and entry.get("id") in upkeep["outcomes"]:
-            progress = entry.get("progress")
-            upkeep["outcomes"][entry["id"]]["progress"] = progress if progress in VALID_PROGRESS else ""
     raw_acts = [a for a in value.get("acts") or [] if isinstance(a, dict) and a.get("act") in acts_vocabulary]
+    # At most MAX_ACTS different acts per message: a repeated act or one past the limit is dropped and recorded.
+    kept, dropped = [], []
+    for a in raw_acts:
+        (dropped if len(kept) >= MAX_ACTS or any(k["act"] == a["act"] for k in kept) else kept).append(a)
+    raw_acts = kept
     acts = [a["act"] for a in raw_acts]
     targets = [str(a.get("target_item_id") or "").strip() for a in raw_acts]
-    targetable = set(open_item_ids) | {upkeep["detection"].get("item_id") or ""} - {""}
+    # "new" stands for the item this turn's detection opens; the caller maps it to that item's id.
+    targetable = set(open_item_ids) | {upkeep["detection"].get("item_id") or "", "new"} - {""}
     targets = [t if t in targetable else "" for t in targets]
     no_message = value.get("no_message") is True
     primary = value.get("primary_act") if value.get("primary_act") in acts else (acts[0] if acts else None)
@@ -279,7 +257,48 @@ def parse_decision(
         "no_message": no_message and not acts,
         "acts": acts if valid and not no_message else [],
         "targets": targets if valid and not no_message else [],
+        "acts_dropped": [{"act": a["act"], "target_item_id": str(a.get("target_item_id") or "")} for a in dropped],
         "primary_act": primary if valid and not no_message else None,
         "state": value.get("state") if value.get("state") in VALID_STATES else None,
         "reason": reason,
+        # Follower role only: whether this turn draws. Anything but an explicit true is no drawing.
+        "execute": value.get("execute") is True and valid and not no_message,
+    }
+
+
+def parse_follower_turn(raw: str, *, allow_r7: bool = False) -> dict[str, Any]:
+    """Validate the grounding Follower's generated turn: an optional route edit and one message.
+
+    The edit is kept only when the turn says to draw, `keep_until` is a point
+    count and every added point is a [row, col] pair; the route is checked
+    server-side at execution.
+    """
+    value = parse_json_object(raw)
+    keep_until, points = value.get("keep_until"), value.get("add")
+    add: list[list[int]] | None = [] if isinstance(points, list) else None
+    for point in points if add is not None else []:
+        try:
+            add.append([int(point[0]), int(point[1])])
+        except (TypeError, ValueError, IndexError, KeyError):
+            add = None
+            break
+    execute = (value.get("execute") is True and add is not None
+               and isinstance(keep_until, int) and not isinstance(keep_until, bool) and keep_until >= 0)
+    steps, used = [], set()
+    for step in value.get("repair_steps") or []:
+        code = step.get("r_code") if isinstance(step, dict) else None
+        evidence = str(step.get("observable_evidence", "")).strip() if isinstance(step, dict) else ""
+        if code in VALID_R_CODES and (code != "R7" or allow_r7) and code not in used and evidence:
+            used.add(code)
+            steps.append({"r_code": code, "observable_evidence": evidence})
+    return {
+        "execute": execute,
+        # The turn said it draws but its edit was invalid: nothing is drawn while the message may say otherwise.
+        "edit_dropped": value.get("execute") is True and not execute,
+        # The route edit: keep the first `keep_until` points, then add these (checked server-side).
+        "keep_until": keep_until if execute else None,
+        "add": add if execute else [],
+        "message": str(value.get("message") or "").strip(),
+        "repair_steps": steps,
+        "r_codes": tuple(step["r_code"] for step in steps),
     }

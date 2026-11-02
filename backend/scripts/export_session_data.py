@@ -240,6 +240,22 @@ def _format_post_timeline_for_participant(
     return timeline
 
 
+def _agent_post_annotations(session_id: str, all_entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The AI agent's actions with the annotations written by scripts/annotate_agent_actions.py, by agent name."""
+    path = os.path.join(_BACKEND_ROOT, 'logs', session_id, 'post_annotations_agent.json')
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding='utf-8') as f:
+        payload = json.load(f)
+    agent_actions = [e for e in all_entries if e.get('is_human') is False]
+    out: Dict[str, Any] = {}
+    for pid in sorted({e.get('participant_id') for e in agent_actions if e.get('participant_id')}):
+        actions = [e for e in agent_actions if e.get('participant_id') == pid]
+        name = next((e.get('participant_name') for e in actions if e.get('participant_name')), pid)
+        out[name] = _format_post_timeline_for_participant(actions, payload)
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description='Export session actions and annotations')
     g = parser.add_mutually_exclusive_group(required=True)
@@ -369,6 +385,7 @@ def main() -> int:
             for pid in participant_ids
         },
         'by_participant': by_participant,
+        'agent_post_session_annotations': _agent_post_annotations(session_id, all_entries),
     }
 
     with open(bundle_path, 'w', encoding='utf-8') as f:
