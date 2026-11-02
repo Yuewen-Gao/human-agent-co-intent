@@ -240,6 +240,51 @@ def _format_post_timeline_for_participant(
     return timeline
 
 
+def _session_participants(record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Each participant's id, name, type (human / ai) and role (guide / follower) from the session record."""
+    return [
+        {k: p.get(k) for k in ('id', 'name', 'type', 'role')}
+        for p in record.get('participants') or []
+        if isinstance(p, dict)
+    ]
+
+
+def _session_condition(record: Dict[str, Any]) -> Dict[str, Any]:
+    """The study condition of one session, from its own record.
+
+    `canvas_condition` follows ALMANAC: c1 = the Guide cannot see the Follower's drawing, c2 = it can.
+    Sessions created before the condition was recorded fall back to what the record shows (`None` = unknown).
+    """
+    from config.map_sets import MAP_SETS
+
+    interaction = record.get('interaction') or {}
+    agent = next((p for p in record.get('participants') or []
+                  if isinstance(p, dict) and str(p.get('type') or '').lower() in ('ai', 'ai_agent')), {})
+    agent_role = str(agent.get('role') or '').lower() or None
+    grounding = interaction.get('groundingTreatment')
+    if not isinstance(grounding, bool):
+        grounding = True if record.get('grounding_decisions') else None
+    dashboard = interaction.get('awarenessDashboard') or {}
+    dashboard_on = bool(dashboard.get('enabled'))
+    guide_sees = interaction.get('guideSeesFollowerDrawing')
+    if agent_role == 'guide':  # the agent Guide's view
+        visible = guide_sees if isinstance(guide_sees, bool) else None
+    else:  # a human Guide sees the drawing only through the Awareness Dashboard
+        visible = dashboard_on and 'Participant.map_progress' in (dashboard.get('items') or [])
+    maps = {str(m.get('role')): m.get('filename') for m in (record.get('params') or {}).get('maps') or []
+            if isinstance(m, dict)}
+    map_set = next((name for name, files in MAP_SETS.items() if files['guide'][0] == maps.get('guide')), None)
+    return {
+        'agent_role': agent_role,
+        'agent_type': {True: 'grounding', False: 'plain'}.get(grounding, 'unknown'),
+        'canvas_condition': {True: 'c2', False: 'c1'}.get(visible, 'unknown'),
+        'guide_sees_follower_drawing': guide_sees if isinstance(guide_sees, bool) else None,
+        'awareness_dashboard_enabled': dashboard_on,
+        'map_set': map_set,
+        'maps': maps,
+    }
+
+
 def _agent_post_annotations(session_id: str, all_entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     """The AI agent's actions with the annotations written by scripts/annotate_agent_actions.py, by agent name."""
     path = os.path.join(_BACKEND_ROOT, 'logs', session_id, 'post_annotations_agent.json')
@@ -279,6 +324,7 @@ def main() -> int:
         list_distinct_participant_ids,
         load_all_in_session_rows_for_session,
         load_all_post_session_rows_for_session,
+        load_research_session,
         load_session_logs,
     )
 
@@ -312,6 +358,7 @@ def main() -> int:
         name_for_json = name
 
     all_entries = load_session_logs(session_id)
+    record = load_research_session(session_id)
     if not name_for_json and all_entries:
         name_for_json = (all_entries[0].get('session_name') or '')[:512]
     human_actions = [e for e in all_entries if e.get('is_human') is True]
@@ -348,7 +395,7 @@ def main() -> int:
         if pid:
             pid_set.add(pid)
     participant_ids = sorted(pid_set)
-    participant_name_by_id = _build_participant_name_map(participant_ids, human_actions)
+    participant_name_by_id = _build_participant_name_map(participant_ids, all_entries)
     participant_names = [participant_name_by_id[pid] for pid in participant_ids]
 
     by_participant: Dict[str, Dict[str, Any]] = {}
@@ -373,6 +420,9 @@ def main() -> int:
         'participant_ids': participant_ids,
         'participant_names': participant_names,
         'participant_name_by_id': participant_name_by_id,
+        'condition': _session_condition(record),
+        'participants': _session_participants(record),
+        'actions_all': sorted(all_entries, key=lambda e: (e.get('timestamp') or '', e.get('action_id') or '')),
         'human_actions_all': human_actions,
         'in_session_annotations_all': _format_in_session_by_participant(
             in_session_all, participant_name_by_id

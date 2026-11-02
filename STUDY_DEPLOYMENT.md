@@ -87,7 +87,7 @@ Files are under `backend/logs/<session_id>/`.
 
 ## 7. After each session
 
-Run these three steps once the human participant has finished their post-session annotation.
+Run these four steps once the human participant has finished their post-session annotation.
 
 1. **Generate the agent's post-session annotation.** Run with `--dry-run` first to see how many actions it will annotate, without any model call. The real run makes one model call per action, about 15–40 per session. It annotates only actions the agent actually took, so 15-second checks that sent nothing are skipped. A rerun skips actions already annotated.
 
@@ -96,14 +96,49 @@ Run these three steps once the human participant has finished their post-session
     docker compose exec backend python -m scripts.annotate_agent_actions --session-id <session_id>
     ```
 
-2. **Export.** Output goes to `backend/exports/`: `<name>_<first 8 of id>_user_actions.json` (all human actions) and `<name>_<first 8 of id>_actions_and_annotations.json` (actions and annotations: human in `post_session_annotations`, agent in `agent_post_session_annotations`, checkpoints in `in_session_annotations_all`).
+2. **Export.** Output goes to `backend/exports/`: `<name>_<first 8 of id>_user_actions.json` (all human actions) and `<name>_<first 8 of id>_actions_and_annotations.json`. The second file holds:
+
+    | Key | Contents |
+    | --- | --- |
+    | `condition` | `agent_role` (guide / follower), `agent_type` (grounding / plain), `canvas_condition` (c1 / c2), `map_set`, `maps`, plus the raw flags `guide_sees_follower_drawing` and `awareness_dashboard_enabled` |
+    | `participants` | Each participant's `id`, `name`, `type` (human / ai) and `role` |
+    | `actions_all` | Every action, human and agent, in time order |
+    | `human_actions_all` | Human actions only |
+    | `post_session_annotations` | Human post-session annotations, by participant name |
+    | `agent_post_session_annotations` | The agent's annotations from step 1 |
+    | `in_session_annotations_all` | Spoken checkpoints |
+
+    The condition is read from the session's own record, which stores it when the session is created. Sessions created before 2026-11-02 did not store it, so their `canvas_condition` can show `unknown`.
 
     ```bash
     docker compose exec backend python -m scripts.export_session_data --session-id <session_id>
     # or by name: --session-name "<session name>"
     ```
 
-3. **Back up the raw folder.** Copy the whole `backend/logs/<session_id>/`. The export does not include `llm_requests.jsonl`; that file exists only here.
+3. **Build the per-role timelines** (ALMANAC format). This reads the file from step 2 and `backend/logs/<session_id>/`, and writes the results to a folder named after the export file: `<name>_guide_timeline.json`, `<name>_follower_timeline.json` and `score_board.txt`. It makes no model calls.
+
+    ```bash
+    docker compose exec backend python -m scripts.build_study_timelines exports/<name>_<first 8 of id>_actions_and_annotations.json
+    ```
+
+    Each row is one action, with the same fields for human and agent:
+
+    | Field | Meaning |
+    | --- | --- |
+    | `role` | guide / follower |
+    | `timestamp` | When the action happened |
+    | `action_type` | message / draw / erase / undo / reset |
+    | `action_content` | The message text (empty for drawing actions) |
+    | `map_canvas` | The Follower's drawing as a 60×40 grid of `x` and `.` |
+    | `drawing_accuracy` | Mean score of the drawn cells: 1 on the route, 2/3 one cell away, 1/3 two cells away, 0 farther |
+    | `mental_model` | The post-session annotation of this action: `rationale`, `team_goal`, `partner_intent`, `self_reasoning`, `alignment` |
+
+    How the drawing is filled in:
+    - **Human Follower:** read from the saved drawing image.
+    - **Agent Follower:** rebuilt by replaying its route edits from `llm_requests.jsonl`. One agent route update becomes two rows, a draw row and the message sent with it.
+    - **Guide rows:** carry the Follower's latest drawing only in c2. In C1, the study setting, they carry none.
+
+4. **Back up the raw folder.** Copy the whole `backend/logs/<session_id>/`. The export does not include `llm_requests.jsonl`; that file exists only here.
 
 Each post-session annotation has the same fields for human and agent, matching the ALMANAC data:
 

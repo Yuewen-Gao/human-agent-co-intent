@@ -45,7 +45,10 @@ from typing import Any, Mapping
 
 from PIL import Image
 
-from map_formatting import SESSION_FILES, detect_route_cells, detect_route_cells_trajectory
+try:  # as a package module (scripts/build_study_timelines.py reuses the helpers below)
+    from .map_formatting import SESSION_FILES, detect_route_cells, detect_route_cells_trajectory
+except ImportError:  # run as a script from this folder
+    from map_formatting import SESSION_FILES, detect_route_cells, detect_route_cells_trajectory
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = HERE / "data_processed"

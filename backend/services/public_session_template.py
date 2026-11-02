@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from config.experiments import get_experiment_by_id
+from config.grounding_treatment import GROUNDING_TREATMENT, GUIDE_SEES_FOLLOWER_DRAWING
 from config.map_sets import active_map_files
 
 
@@ -35,6 +36,11 @@ def create_public_maptask_session(session_key: str) -> dict[str, Any]:
         }
         for role, filename in active_map_files()
     ]
+    # The condition is written into the session, so each session keeps its own record even if the
+    # server defaults change later (the session's own values also take precedence over those defaults).
+    condition: dict[str, Any] = {"guideSeesFollowerDrawing": bool(GUIDE_SEES_FOLLOWER_DRAWING)}
+    if isinstance(GROUNDING_TREATMENT, bool):
+        condition["groundingTreatment"] = GROUNDING_TREATMENT
     return {
         "session_id": session_id,
         "session_name": normalized_key,
@@ -52,6 +58,7 @@ def create_public_maptask_session(session_key: str) -> dict[str, Any]:
             "messageLength": False,
             "agentPerceptionTimeWindow": 15,
             "rationales": "step_wise",
+            **condition,
         },
         "created_at": now,
         "started_at": None,
