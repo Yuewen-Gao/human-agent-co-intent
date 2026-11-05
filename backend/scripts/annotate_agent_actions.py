@@ -5,7 +5,6 @@ Offline and separate from the agent: nothing here runs during a session or feeds
 ``logs/<session_id>/`` (the agent's action log and ``llm_requests.jsonl``) and, for each action the agent actually took
 (a turn that sent nothing has no action and is not annotated), makes one LLM call with:
   - the agent's task instructions and what it could see at that turn (the logged request it worked from),
-  - its internal judgements that turn (the grounding stages' results; none for the plain agent),
   - the action it took.
 The answers are written to ``logs/<session_id>/post_annotations_agent.json``, keyed by action_id, in the same saved
 format as the participants' post-session annotations, so the export reads both the same way.
@@ -34,7 +33,6 @@ if _BACKEND_ROOT not in sys.path:
 PROMPT_FILE = os.path.join(_BACKEND_ROOT, 'agent', 'prompts', 'agent_annotation_prompt.txt')
 OUTPUT_NAME = 'post_annotations_agent.json'
 FINAL_STAGES = ('agent.action', 'grounding.repair', 'grounding.follower_turn')
-JUDGEMENT_STAGES = ('grounding.h', 'grounding.w', 'grounding.decide', 'grounding.repair', 'grounding.follower_turn')
 GAME_STATE_MARKER = '\n\n<CURRENT GAME STATE>\n'
 EVIDENCE_OPEN, EVIDENCE_CLOSE = '<CURRENT OBSERVABLE EVIDENCE>', '</CURRENT OBSERVABLE EVIDENCE>'
 MAX_FOLLOWER_GAP_SECONDS = 10.0
@@ -106,7 +104,10 @@ def _text(request: Dict[str, Any]) -> str:
 
 
 def turn_context(turn_id: str, trace: List[Dict[str, Any]], role: str = 'Guide') -> Dict[str, Any]:
-    """Task instructions, what the agent saw, and its judgements in this turn.
+    """Task instructions and what the agent saw in this turn.
+
+    The grounding agent's intermediate stage results are left out, so both agent types are annotated from the same
+    information.
 
     The plain agent's own planning, action space and output format are left out of the task instructions, as the
     grounding stages leave them out (`guide_evidence` / `follower_evidence`): they ask for a different JSON.
@@ -123,10 +124,7 @@ def turn_context(turn_id: str, trace: List[Dict[str, Any]], role: str = 'Guide')
         evidence = _text(final) if final else ''
     evidence = (follower_evidence if role == 'Follower' else guide_evidence)(evidence)
     task, marker, seen = evidence.partition(GAME_STATE_MARKER)
-    judgements = [{'stage': row.get('stage'), 'result': row.get('parsed_result')}
-                  for stage in JUDGEMENT_STAGES for row in rows
-                  if row.get('event') == 'result' and row.get('stage') == stage]
-    return {'task': task.strip(), 'seen': (marker + seen).strip() if marker else '', 'judgements': judgements}
+    return {'task': task.strip(), 'seen': (marker + seen).strip() if marker else ''}
 
 
 def _role(action: Dict[str, Any], trace: List[Dict[str, Any]], turn_id: str) -> str:
@@ -141,14 +139,11 @@ def _role(action: Dict[str, Any], trace: List[Dict[str, Any]], turn_id: str) -> 
 def build_prompt(role: str, context: Dict[str, Any], action: Dict[str, Any]) -> str:
     with open(PROMPT_FILE, encoding='utf-8') as f:
         instruction = f.read().replace('{role}', role)
-    judgements = ('\n'.join(json.dumps(j, ensure_ascii=False) for j in context['judgements'])
-                  if context['judgements'] else 'none (this agent made no separate judgements before acting)')
     taken = {'action_type': action.get('action_type'), 'content': action.get('action_content'),
              'details': action.get('metadata') or {}}
     return (
         '<TASK INSTRUCTIONS>\n' + context['task'] + '\n</TASK INSTRUCTIONS>\n\n'
         + '<WHAT YOU COULD SEE AT THIS MOMENT>\n' + (context['seen'] or 'not recorded') + '\n</WHAT YOU COULD SEE AT THIS MOMENT>\n\n'
-        + '<YOUR INTERNAL JUDGEMENTS AT THIS MOMENT>\n' + judgements + '\n</YOUR INTERNAL JUDGEMENTS AT THIS MOMENT>\n\n'
         + '<THE ACTION YOU TOOK>\n' + json.dumps(taken, ensure_ascii=False) + '\n</THE ACTION YOU TOOK>\n\n'
         + '<ANNOTATION>\n' + instruction + '\n</ANNOTATION>'
     )

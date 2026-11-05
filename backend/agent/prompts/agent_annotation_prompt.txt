@@ -1,4 +1,4 @@
-You took part in the Map Task above as the {role}. Below are, for one moment of that session: the task instructions you had, what you could see at that moment, your internal judgements at that moment (if any), and the action you then took.
+You took part in the Map Task above as the {role}. Below are, for one moment of that session: the task instructions you had, what you could see at that moment, and the action you then took.
 
 Annotate that moment the way the human participants annotate their own actions after a session. Answer from your point of view at that moment, using only what is shown here, as you understood it then.
 
