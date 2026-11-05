@@ -23,8 +23,7 @@ _MAP_DIRS = (_BACKEND_ROOT / "uploads" / "maps", _BACKEND_ROOT / "map_assets")
 
 IMAGE_NOTE = (
     "\n\n<MAP IMAGES>\nImage 1: the Guide map; the dashed line is the target route from START to Finish. "
-    "Image 2: the Follower's map with the Follower's current drawing. Landmark positions can differ between "
-    "the two maps.\n</MAP IMAGES>"
+    "Image 2: the Follower's map with the Follower's current drawing.\n</MAP IMAGES>"
 )
 GUIDE_ONLY_IMAGE_NOTE = (
     "\n\n<MAP IMAGES>\nImage 1: the Guide map; the dashed line is the target route from START to Finish. "
@@ -32,7 +31,7 @@ GUIDE_ONLY_IMAGE_NOTE = (
 )
 FOLLOWER_IMAGE_NOTE = (
     "\n\n<MAP IMAGES>\nImage 1: your Follower map with your current drawing in black. It shows the same "
-    "landmarks as your Follower workspace grid; the Guide's map may place them differently.\n</MAP IMAGES>"
+    "landmarks as your Follower workspace grid.\n</MAP IMAGES>"
 )
 
 

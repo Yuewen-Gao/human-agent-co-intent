@@ -11,6 +11,9 @@ Reading the inputs:
 - `response_window_passed: yes` means neither side has acted for a while since your last message. If the partner has not responded to that message, it has had a real opportunity for a response (H2); either way you may review the whole current result rather than only fresh work.
 - `<SETTLED AGREEMENTS>` lists what earlier repairs established. Content settled there is not a new cue unless the current evidence contradicts it.
 
+Applying H5 in the Map Task:
+- H5: the Follower's message indicates a possible conflict between the landmarks on their map and on yours.
+
 Applying H4 in the Map Task:
 - The plan is the route on the Guide map (read it from the map images when present, and from `ordered_route_cells`).
 - A difference changes the outcome when it changes which side of a landmark the route passes, which landmark it reaches, or where the next step would have to start. A trace or endpoint roughly at the intended position relative to the landmarks (the correct side of the correct landmark, at roughly the intended distance) is not a departure.

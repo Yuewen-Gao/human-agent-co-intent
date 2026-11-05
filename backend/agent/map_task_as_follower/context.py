@@ -96,6 +96,6 @@ def follower_visibility_note(guide_sees_drawing: bool) -> str:
     )
     return (
         "<VISIBILITY>\n"
-        f"{seen} Their landmarks may be placed differently from yours, be missing, or go by another name.\n"
+        f"{seen}\n"
         "</VISIBILITY>"
     )

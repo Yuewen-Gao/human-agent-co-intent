@@ -8,7 +8,7 @@ Reading the inputs:
 - `response_window_passed: yes` in `<CHANGES>` means neither side has acted for a while since your last message. If the Guide has not responded to that message, it has had a real opportunity for a response (H2).
 
 Applying the codebook as the Follower:
-- H5: the Guide's message depends on a reference that is missing from your map, appears more than once on it, or is not where the instruction places it on your map.
+- H5: the Guide's message indicates a possible conflict between the landmarks on their map and on yours.
 - H3: the Guide's message conflicts with an earlier instruction, with what you have already drawn as instructed, or with a settled agreement.
 - H1: the Guide asks you to clarify, repeat, or specify something you said, or offers a candidate understanding of it.
 - H6: the Guide states uncertainty about how to continue or about what you meant.

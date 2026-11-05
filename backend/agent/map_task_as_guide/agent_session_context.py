@@ -214,8 +214,8 @@ def build_follower_current_workspace_context(session: Mapping[str, Any]) -> str:
 
 GUIDE_BLIND_NOTE = (
     "<VISIBILITY>\n"
-    "You cannot see the Follower's map or drawing in this session. You know only what the Follower tells you; "
-    "their landmarks may be placed differently from yours, be missing, or go by another name. Do not assume they drew what you asked, "
+    "You cannot see the Follower's map or drawing in this session. You know only what the Follower tells you. "
+    "Do not assume they drew what you asked, "
     "and do not describe or judge their drawing beyond what they have told you.\n"
     "</VISIBILITY>"
 )
