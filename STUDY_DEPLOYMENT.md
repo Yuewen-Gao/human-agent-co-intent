@@ -1,6 +1,6 @@
 # Map Task Study: Deployment Handover
 
-For whoever deploys the study site: how to set the conditions, which APIs to configure, where each session's data is stored, and how to export it. Current as of 2026-11-02 (map set H2).
+For whoever deploys the study site: how to set the conditions, which APIs to configure, where each session's data is stored, and how to export it. Current as of 2026-11-06 (map set H2).
 
 ## 1. Study setup
 
@@ -17,12 +17,19 @@ Each session pairs one human participant with one AI agent on the Map Task, text
 | Agent Follower, grounding | `"follower"` | `True` | Guide |
 | Agent Follower, plain | `"follower"` | `False` | Guide |
 
+**What everyone is told about the maps.** Both agent prompts state, in their rules (line 8 of `backend/agent/prompts/maptask_agent_prompt.txt` and `maptask_follower_agent_prompt.txt`):
+
+> The two maps may differ in three landmarks, including misplaced, misnamed, and duplicate landmarks.
+
+Read this sentence to every participant, word for word, during onboarding, so the human and the agent start with the same information. The app's Rules button shows nothing, so onboarding is the only place participants get it. The sentence describes map set H2; if the maps change, change it in both prompts and in the onboarding script.
+
 ## 2. Must do before deploying
 
 - [x] **Awareness Dashboard off.** Done in the code: the public session template, `backend/services/public_session_template.py`, sets `"awarenessDashboard": {"enabled": False, "items": []}`. Keep it off: with it on, a human Guide sees the Follower's drawing in the Info Dashboard, which breaks C1.
 - [ ] **Turn on the LLM trace log:** set `LLM_TRACE_LOGGING=1` in `backend/.env`. It is off by default; without it there is no `llm_requests.jsonl`, and the agent's post-session annotation cannot be generated.
 - [ ] **Keep and back up `backend/logs/`.** The LLM trace and the agent's annotations exist only there, not in the database. Docker mounts it to the host as `./backend/logs:/app/logs`.
 - [ ] **Leave `GUIDE_SEES_FOLLOWER_DRAWING = False`** in `backend/config/grounding_treatment.py`. This is the agent side of C1.
+- [x] **In-session spoken checkpoints are off.** They fire at a share of the target route length, and H2 has no target length in `route_pixel_ratio_from_map_filename` (`backend/functions.py`), so they never fire. Do not add one for H2. Do not turn off the in-session annotation switch in the session's experiment config either: it also makes the session untimed, ends the task when the participant presses **Submit task** (the agent does not press it), and limits the agent's periodic checks.
 
 ## 3. Switching conditions
 
@@ -51,7 +58,7 @@ All go in `backend/.env`, which Docker reads through `env_file`. Never commit ke
 | Purpose | Variables | Notes |
 | --- | --- | --- |
 | Agent model | `LLM_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL=gpt-5.6-sol` | Official OpenAI API. `OPENAI_REASONING_EFFORT` is optional (unset = model default); `OPENAI_BASE_URL` is normally unset. The agent-annotation script uses the same settings. |
-| Speech transcription (spoken post-session rationale, in-session checkpoints) | `OPENAI_API_KEY` | Uses OpenAI `whisper-1`. Azure also works: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_WHISPER_DEPLOYMENT`, `AZURE_OPENAI_API_VERSION`; when set, Azure is used first. |
+| Speech transcription (spoken post-session rationale) | `OPENAI_API_KEY` | Uses OpenAI `whisper-1`. Azure also works: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_WHISPER_DEPLOYMENT`, `AZURE_OPENAI_API_VERSION`; when set, Azure is used first. |
 | Database | `DATABASE_URL` (or `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`), `PGSCHEMA` | PostgreSQL. Defaults to the Postgres bundled in docker compose; set `DATABASE_URL` for an external one such as RDS. `PGSCHEMA` defaults to `humanagent_collab`. |
 | LLM trace log | `LLM_TRACE_LOGGING=1` | Required; see section 2. |
 | Flask session key | `FLASK_SECRET_KEY` | Set a random string, not the default. |
@@ -71,7 +78,14 @@ docker compose -f docker-compose.rds.yml --env-file .env up --build
 
 Ports: backend `${BACKEND_PORT:-5001}` → container 5000; frontend `${FRONTEND_PORT:-8080}` → container 80.
 
-## 6. Data each session produces
+## 6. Running each session
+
+- **Onboarding:** explain the rules and the interface, and read the map-difference sentence from section 1 word for word.
+- **Participant ID:** the pre- and post-questionnaires (Qualtrics) start with a participant ID question. Record each participant ID together with the session ID and the condition, so the questionnaires can be joined to the session data.
+- **End of the task:** the participant presses **Submit task**. This ends the task and opens the post-session annotation. The session's status reads `paused` either way; whether Submit was pressed is stored in the session's `maptask_submit_confirmed_ids`.
+- **Post-session annotation:** the participant then annotates their own actions (spoken rationale plus Q1–Q4).
+
+## 7. Data each session produces
 
 Files are under `backend/logs/<session_id>/`.
 
@@ -79,15 +93,15 @@ Files are under `backend/logs/<session_id>/`.
 | --- | --- | --- |
 | Every action: message, draw, erase, undo, reset (human and agent) | `action_logs` | `<participant_id>.jsonl` |
 | Session configuration (condition, maps, participants) | `research_sessions` | — |
-| In-session spoken checkpoints (25% / 50% / 75%) | `in_session_annotations` | database only |
+| In-session spoken checkpoints | `in_session_annotations` | none under H2 (off, see section 2) |
 | Human post-session annotation (spoken rationale + Q1–Q4) | `post_session_annotations` | `post_annotations_<participant_id>.json` |
 | Action screenshots and page snapshots | — | `files/` (or S3) |
 | Every agent LLM call (request, response, intermediate judgements) | — | `llm_requests.jsonl` (needs `LLM_TRACE_LOGGING=1`) |
 | Agent post-session annotation (offline script, same format as the human's) | — | `post_annotations_agent.json` |
 
-## 7. After each session
+## 8. After data collection
 
-Run these four steps once the human participant has finished their post-session annotation.
+Run these four steps for each session once the participant has finished their post-session annotation. They do not need to run right after the session: the agent's annotation is generated offline, from `backend/logs/<session_id>/` alone, so it can run in one batch after data collection, as long as that folder is kept.
 
 1. **Generate the agent's post-session annotation.** Run with `--dry-run` first to see how many actions it will annotate, without any model call. The real run makes one model call per action, about 15–40 per session. It annotates only actions the agent actually took, so 15-second checks that sent nothing are skipped. A rerun skips actions already annotated.
 
@@ -106,7 +120,7 @@ Run these four steps once the human participant has finished their post-session 
     | `human_actions_all` | Human actions only |
     | `post_session_annotations` | Human post-session annotations, by participant name |
     | `agent_post_session_annotations` | The agent's annotations from step 1 |
-    | `in_session_annotations_all` | Spoken checkpoints |
+    | `in_session_annotations_all` | Spoken checkpoints (empty under H2) |
 
     The condition is read from the session's own record, which stores it when the session is created. Sessions created before 2026-11-02 did not store it, so their `canvas_condition` can show `unknown`.
 
