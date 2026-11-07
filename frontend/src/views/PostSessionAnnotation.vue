@@ -93,7 +93,7 @@ const Q4_REASONS = [
 ]
 
 const RECORD_PHASE_INSTRUCTION =
-  'Please briefly answer all four questions in one recording.\nClick the button to start recording.'
+  'Please briefly answer all three questions in one recording.\nClick the button to start recording.'
 
 /** One combined explanation (transcribed) for all four questions per moment */
 const MOMENT_EXPLAIN_KEY = 'momentExplanationTranscript'

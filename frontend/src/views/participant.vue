@@ -2391,7 +2391,7 @@ onUnmounted(() => {
         <h3>Submit task</h3>
       </div>
       <div class="modal-body">
-        <p class="maptask-submit-confirm-text">Please confirm you have finish the task.</p>
+        <p class="maptask-submit-confirm-text">Please confirm you have finished the task.</p>
         <div class="maptask-submit-actions">
           <button
             type="button"

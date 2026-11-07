@@ -440,8 +440,7 @@ class AgentRunner:
                 prompt += (
                     '\n' + follower_visibility_note(guide_sees_follower_drawing(session))
                     + '\n<FOLLOWER EVENT>\n'
-                    'A new visible human Guide message triggered this decision. '
-                    'Use only that newest instruction and your current Follower workspace.\n'
+                    'A new visible human Guide message triggered this decision.\n'
                     '</FOLLOWER EVENT>'
                 )
             trace_context = None
