@@ -81,7 +81,8 @@ Ports: backend `${BACKEND_PORT:-5001}` → container 5000; frontend `${FRONTEND_
 ## 6. Running each session
 
 - **Onboarding:** explain the rules and the interface, and read the map-difference sentence from section 1 word for word.
-- **Participant ID:** the pre- and post-questionnaires (Qualtrics) start with a participant ID question. Record each participant ID together with the session ID and the condition, so the questionnaires can be joined to the session data.
+- **Task link (Prolific):** set the study's task URL to `https://<host>/login?PROLIFIC_PID={{%PROLIFIC_PID%}}` and turn on Prolific's URL parameters. The login page then logs the participant in with their Prolific ID as the session key, so they type nothing; the session's name is their Prolific ID, and reopening the link returns to the same session. Without `PROLIFIC_PID` in the URL, the page shows the manual session-key form (for testing).
+- **Participant ID:** the pre- and post-questionnaires (Qualtrics) start with a participant ID question, answered with the Prolific ID. Record each participant ID together with the session ID and the condition, so the questionnaires can be joined to the session data.
 - **End of the task:** the participant presses **Submit task**. This ends the task and opens the post-session annotation. The session's status reads `paused` either way; whether Submit was pressed is stored in the session's `maptask_submit_confirmed_ids`.
 - **Post-session annotation:** the participant then annotates their own actions (spoken rationale plus Q1–Q4).
 

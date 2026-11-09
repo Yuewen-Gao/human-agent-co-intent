@@ -1,6 +1,11 @@
 <template>
   <div class="login-container">
-    <div class="login-card">
+    <div v-if="isAutoLogin" class="login-card">
+      <div class="header">
+        <h1>Starting your session…</h1>
+      </div>
+    </div>
+    <div v-else class="login-card">
       <div class="header">
         <h1>Participant Login</h1>
       </div>
@@ -41,15 +46,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 const router = useRouter()
+const route = useRoute()
 
 // Reactive state
 const sessionName = ref('')
 const isLoading = ref(false)
 const errorMessage = ref('')
+// True while logging in with the Prolific ID from the URL; a failure falls back to the form.
+const isAutoLogin = ref(false)
+
+// Prolific adds ?PROLIFIC_PID=... to the study link: that ID is the session key, so the participant types nothing.
+onMounted(async () => {
+  const pid = route.query.PROLIFIC_PID
+  if (typeof pid !== 'string' || !/^[A-Za-z0-9]{1,64}$/.test(pid)) return
+  sessionName.value = pid
+  isAutoLogin.value = true
+  await handleLogin()
+  isAutoLogin.value = false
+})
 
 // Handle form submission
 const handleLogin = async () => {
